@@ -27,6 +27,25 @@ googleFormsRouter.get("/", async (req, res) => {
 // path for "Google-sourced" forms anywhere else in the app.
 googleFormsRouter.post("/:id/import", async (req, res) => {
   try {
+    // Re-importing a Google Form this account already has must not mint a second cloud form —
+    // see forms/repository.js getFormByGoogleFormId. Mirrors the remote_form_id dedup guard
+    // importCentralFormLocally already applies on the local-cloud-import path (server/cloud/
+    // routes.js); this is the same guard for the google_form_id path, which previously had none.
+    // The existing form's responses still reach this device normally: the local caller imports it
+    // via the ordinary remote_form_id path and then runs a regular sync, which downloads every
+    // response already on the cloud copy — including ones originally pulled in from Google.
+    const existing = await formsRepo.getFormByGoogleFormId(req.userId, req.params.id);
+    if (existing) {
+      return res.status(200).json({
+        ...existing,
+        alreadyImported: true,
+        skipped: [],
+        importedResponseCount: 0,
+        skippedExistingResponseCount: 0,
+        responseImportError: null,
+      });
+    }
+
     const googleForm = await getGoogleForm(req.userId, req.params.id);
     const { title, description, questions, skipped } = translateGoogleForm(googleForm);
 

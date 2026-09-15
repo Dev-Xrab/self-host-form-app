@@ -5,7 +5,7 @@ import { subjectsApi } from "../../features/subjects/services/subjectsApi";
 import { Icons } from "./icons";
 import { Monogram, initial } from "./Monogram";
 import PageHeader from "./PageHeader";
-import Modal from "./Modal";
+import Dialog from "../../components/Dialog/Dialog";
 import DeleteSubjectModal from "./DeleteSubjectModal";
 
 const emptyForm = { name: "", code: "" };
@@ -119,7 +119,7 @@ export default function SubjectsPage() {
       </div>
 
       {showModal && (
-        <Modal title="Add Subject" onClose={() => setShowModal(false)}>
+        <Dialog title="Add Subject" onClose={() => setShowModal(false)}>
           <form className="dash-form" onSubmit={handleSubmit}>
             <label className="dash-form-field">
               <span className="dash-form-label">Subject name</span>
@@ -155,7 +155,7 @@ export default function SubjectsPage() {
               </button>
             </div>
           </form>
-        </Modal>
+        </Dialog>
       )}
 
       {deleteTarget && (

@@ -8,7 +8,8 @@ import { STATUS_LABEL } from "../../features/sessions/utils/time";
 import { Icons } from "./icons";
 import { Monogram, initial } from "./Monogram";
 import PageHeader from "./PageHeader";
-import Modal from "./Modal";
+import Dialog from "../../components/Dialog/Dialog";
+import Checkbox from "../../components/ui/Checkbox";
 import "../../features/sessions/components/session.css";
 
 const emptyForm = { name: "", formId: "", durationMinutes: "", responsesEditable: false };
@@ -134,7 +135,7 @@ export default function SessionsListPage() {
       </div>
 
       {showModal && (
-        <Modal title="Create Session" onClose={() => setShowModal(false)}>
+        <Dialog title="Create Session" onClose={() => setShowModal(false)}>
           <form className="dash-form" onSubmit={handleSubmit}>
             <label className="dash-form-field">
               <span className="dash-form-label">Session name</span>
@@ -169,14 +170,13 @@ export default function SessionsListPage() {
               />
             </label>
 
-            <label className="dash-form-field dash-form-checkbox-field">
-              <input
-                type="checkbox"
+            <div className="dash-form-field dash-form-checkbox-field">
+              <Checkbox
                 checked={form.responsesEditable}
-                onChange={(e) => setForm((f) => ({ ...f, responsesEditable: e.target.checked }))}
+                onChange={(checked) => setForm((f) => ({ ...f, responsesEditable: checked }))}
+                label={<span className="dash-form-label">Allow respondents to edit their answer after submitting</span>}
               />
-              <span className="dash-form-label">Allow respondents to edit their answer after submitting</span>
-            </label>
+            </div>
 
             {createError && <p className="dash-form-error">{createError}</p>}
 
@@ -189,7 +189,7 @@ export default function SessionsListPage() {
               </button>
             </div>
           </form>
-        </Modal>
+        </Dialog>
       )}
     </>
   );

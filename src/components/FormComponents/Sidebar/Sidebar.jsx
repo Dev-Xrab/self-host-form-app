@@ -1,6 +1,6 @@
 import { Link, NavLink, useParams } from "react-router-dom";
 import useFormStore, { useFormActions } from "../../../../store/useFormStore";
-import { QUESTION_TYPES } from "../questionTypes";
+import { QUESTION_TYPES } from "../../../lib/questionRegistry";
 import { Icons } from "../icons";
 import "./sidebar.css";
 import logo from "../../../../src/images/logo.png";
@@ -27,6 +27,7 @@ export default function Sidebar() {
 
   const NAV_ITEMS = [
     { to: `/forms/${formId}`, label: "Questions", end: true },
+    { to: `/forms/${formId}/responses`, label: "All Responses" },
     { to: `/forms/${formId}/settings`, label: "Settings" },
   ];
 
@@ -38,13 +39,14 @@ export default function Sidebar() {
     <aside className="form-sidebar">
       <div className="form-sidebar-scroll">
         <Link to="/dashboard/forms" className="form-sidebar-brand form-sidebar-brand-link" title="Back to Forms">
+          <Icons.arrowLeft className="form-sidebar-back-icon" />
           <img
                   src={logo}
                   alt="Host login illustration"
                   className="host-login-illustration"
-                  style={{ width: "20px", height: "20px", paddingBottom: "10px" }}
+                  style={{ width: "20px", height: "20px" }}
                 />
-          StoneArch
+          Self Host Form
         </Link>
 
         <div className="form-sidebar-mode-toggle">

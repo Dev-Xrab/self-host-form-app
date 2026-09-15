@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite",
     "server": "node --watch server/index.js",
+    "cloud-server": "node --watch --env-file=cloud-server/.env cloud-server/index.js",
     "build": "vite build",
     "start": "node server/index.js",
     "desktop": "electron .",
@@ -18,13 +19,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "jszip": "^3.10.1",
     "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.3",
-    "xlsx": "^0.18.5",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
@@ -49,5 +52,8 @@
       "target": "nsis",
       "icon": "build/icon.ico"
     }
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

@@ -134,3 +134,25 @@ export function deleteSession(id) {
   const result = db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   return result.changes > 0;
 }
+
+const selectSyncedSessionStmt = db.prepare("SELECT id FROM sessions WHERE form_id = ? AND code = ?");
+
+// Responses downloaded from the cloud server (see server/cloud/sync.js) were collected under a
+// session that only ever existed on the ORIGINATING device — this device never joined it, so it
+// has no local session row to attach them to, and `responses.session_id` is a foreign key that
+// must point at something real. Rather than inventing a whole "responses that don't belong to a
+// session" concept (a second code path through every session-scoped view: SessionDetailPage,
+// the gradebook, exports), each remote device gets one durable "ended" session per form here —
+// every response synced down from that device lands in it, and it shows up in Sessions/Gradebook
+// exactly like a session run on this machine, just labeled by where it actually came from.
+export function findOrCreateSyncedSession(formId, remoteDeviceId, deviceLabel) {
+  const code = `SYNCED-${remoteDeviceId.slice(0, 8)}`;
+  const existing = selectSyncedSessionStmt.get(formId, code);
+  if (existing) return existing.id;
+
+  const id = randomUUID();
+  db.prepare(
+    `INSERT INTO sessions (id, form_id, name, code, status, created_at) VALUES (?, ?, ?, ?, 'ended', ?)`
+  ).run(id, formId, `Synced from ${deviceLabel || "another device"}`, code, now());
+  return id;
+}

@@ -1,17 +1,17 @@
 .respond-page {
-  --rf-bg: #f7f7f5;
-  --rf-card: #fff;
-  --rf-border: #e9e9e7;
-  --rf-border-strong: #d3d1cb;
-  --rf-text: #37352f;
-  --rf-text-secondary: #787774;
-  --rf-text-tertiary: #9b9a97;
-  --rf-surface: #f1f1ef;
-  --rf-accent: #37352f;
-  --rf-danger: #c0392b;
-  --rf-danger-bg: #fceceb;
-  --rf-radius: 12px;
-  --rf-shadow: 0 1px 2px rgba(15, 15, 15, 0.04), 0 0 0 1px rgba(15, 15, 15, 0.045);
+  --rf-bg: var(--surface-bg);
+  --rf-card: var(--surface-card);
+  --rf-border: var(--border);
+  --rf-border-strong: var(--border-strong);
+  --rf-text: var(--text);
+  --rf-text-secondary: var(--text-secondary);
+  --rf-text-tertiary: var(--text-tertiary);
+  --rf-surface: var(--surface-muted);
+  --rf-accent: var(--accent);
+  --rf-danger: var(--danger);
+  --rf-danger-bg: var(--danger-bg);
+  --rf-radius: var(--radius-lg);
+  --rf-shadow: var(--shadow-sm);
   --rf-indent: 32px;
 
   width: 100%;
@@ -45,7 +45,7 @@
 
 .respond-form-column {
   width: 100%;
-  max-width: 700px;
+  max-width: 640px;
   /* .respond-page centers its child vertically for the short join/done cards — this one can
      run much taller than the viewport, so opt out and stay pinned to the top like normal
      document flow instead of starting the page already scrolled past its own heading. */
@@ -53,34 +53,17 @@
 
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 4px;
 }
 
-.respond-form-header {
-  padding: 28px 28px 26px;
-
-  background: var(--rf-card);
-  border: 1px solid var(--rf-border);
-  border-top: 6px solid #000;
-  border-radius: var(--rf-radius);
-  box-shadow: var(--rf-shadow);
-}
-
-.respond-form-header-row {
+/* Slim toolbar above the question column — no card, no border, just Leave + the timer, so
+   the page reads as one continuous document rather than a form embedded in a frame. */
+.respond-toolbar {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
-}
-
-.respond-form-header h1 {
-  margin: 0 0 8px;
-  font-size: 24px;
-  font-weight: 650;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
-  color: var(--rf-text);
+  margin-bottom: 28px;
 }
 
 .respond-exit-link {
@@ -124,7 +107,7 @@
   padding: 22px;
   box-sizing: border-box;
 
-  background: #fff;
+  background: var(--surface-card);
   border-radius: var(--rf-radius);
   box-shadow: 0 12px 32px rgba(15, 15, 15, 0.18);
 }
@@ -154,7 +137,7 @@
   border: none;
   border-radius: 7px;
   background: var(--rf-danger);
-  color: #fff;
+  color: var(--surface-card);
 
   font-family: Inter, sans-serif;
   font-size: 13.5px;
@@ -259,31 +242,20 @@
   color: var(--rf-danger);
 }
 
-.respond-form-header p {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--rf-text-secondary);
-  white-space: pre-wrap;
+/* One question in the pager's question list — flat, no card/border/shadow, so a page with
+   several questions reads as one continuous document instead of a stack of tiles. */
+.answer-question {
+  padding: 22px 0;
+  border-top: 1px solid var(--rf-border);
 }
 
-.answer-question-card {
-  padding: 22px 24px;
-
-  background: var(--rf-card);
-  border: 1px solid var(--rf-border);
-  border-radius: var(--rf-radius);
-  box-shadow: var(--rf-shadow);
-  transition: border-color 0.15s, box-shadow 0.15s;
+.qp-questions .answer-question:first-child {
+  border-top: none;
+  padding-top: 0;
 }
 
-.answer-question-card:focus-within {
-  border-color: var(--rf-border-strong);
-}
-
-.answer-question-card-error {
-  border-color: var(--rf-danger);
-  box-shadow: 0 0 0 1px var(--rf-danger);
+.answer-question-error-state .answer-question-title {
+  color: var(--rf-text);
 }
 
 .answer-question-header {
@@ -314,9 +286,10 @@
 .answer-question-title {
   margin: 0;
   padding-top: 2px;
-  font-size: 16px;
+  font-size: 17.5px;
   font-weight: 600;
   line-height: 1.45;
+  letter-spacing: -0.005em;
   color: var(--rf-text);
 }
 
@@ -434,7 +407,7 @@ input[type="checkbox"] {
   height: 20px;
   box-sizing: border-box;
   border: 1.5px solid var(--rf-border-strong);
-  background: #fff;
+  background: var(--surface-card);
 
   display: inline-grid;
   place-content: center;
@@ -462,7 +435,7 @@ input[type="radio"]:checked::after {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--surface-card);
 }
 
 input[type="checkbox"]:checked::after {
@@ -470,8 +443,8 @@ input[type="checkbox"]:checked::after {
   width: 10px;
   height: 6px;
   margin-top: -2px;
-  border-left: 2px solid #fff;
-  border-bottom: 2px solid #fff;
+  border-left: 2px solid var(--surface-card);
+  border-bottom: 2px solid var(--surface-card);
   transform: rotate(-45deg);
 }
 
@@ -537,7 +510,7 @@ input[type="checkbox"]:focus-visible {
 .answer-scale-item:has(input:checked) span {
   background: var(--rf-accent);
   border-color: var(--rf-accent);
-  color: #fff;
+  color: var(--surface-card);
 }
 
 .answer-scale-item:focus-within span {
@@ -553,6 +526,89 @@ input[type="checkbox"]:focus-visible {
 
   font-size: 12.5px;
   color: var(--rf-text-tertiary);
+}
+
+/* Matrix / grid question — one shared table, columns laid out once as the header row.
+   Below 640px this same markup restacks per-row (see the media query at the bottom); the
+   per-cell .matrix-cell-label (hidden here) becomes each row's option text there. */
+.answer-matrix {
+  margin-top: 16px;
+  margin-left: var(--rf-indent);
+}
+
+.answer-matrix-scroll {
+  overflow-x: auto;
+}
+
+.matrix-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.4fr) repeat(var(--matrix-columns, 5), minmax(64px, 1fr));
+  min-width: fit-content;
+}
+
+.matrix-row {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+}
+
+.matrix-row + .matrix-row {
+  border-top: 1px solid var(--rf-border);
+}
+
+.matrix-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 8px;
+  box-sizing: border-box;
+}
+
+.matrix-cell-row-label {
+  justify-content: flex-start;
+  padding-left: 4px;
+  text-align: left;
+  font-size: 13.5px;
+  color: var(--rf-text);
+}
+
+.matrix-row-header .matrix-cell-col-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rf-text-secondary);
+  text-align: center;
+  line-height: 1.3;
+}
+
+.matrix-cell-input {
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.12s;
+}
+
+.matrix-cell-input:hover {
+  background: var(--rf-bg);
+}
+
+.matrix-cell-input-checked {
+  background: var(--rf-surface);
+}
+
+.matrix-cell-label {
+  display: none;
+}
+
+.matrix-row-missing .matrix-cell-row-label {
+  color: var(--rf-danger);
+}
+
+.matrix-row-missing-mark {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--rf-danger);
 }
 
 .answer-file-upload {
@@ -627,41 +683,10 @@ input[type="checkbox"]:focus-visible {
   margin: 0;
   padding: 12px 14px;
   background: var(--rf-danger-bg);
-  border: 1px solid #f4c7c2;
+  border: 1px solid var(--danger-border);
   border-radius: 8px;
   font-size: 13.5px;
   color: var(--rf-danger);
-}
-
-.respond-submit-btn {
-  align-self: flex-start;
-
-  padding: 12px 26px;
-  border: none;
-  border-radius: 8px;
-
-  background: #000;
-  color: #fff;
-
-  font-family: Inter, sans-serif;
-  font-size: 14.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s, transform 0.1s;
-}
-
-.respond-submit-btn:hover {
-  background: #333;
-}
-
-.respond-submit-btn:active {
-  transform: scale(0.98);
-}
-
-.respond-submit-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-  transform: none;
 }
 
 .respond-code-card,
@@ -736,7 +761,7 @@ input[type="checkbox"]:focus-visible {
   border-radius: 8px;
 
   background: #000;
-  color: #fff;
+  color: var(--surface-card);
 
   font-family: Inter, sans-serif;
   font-size: 13.5px;
@@ -794,7 +819,7 @@ input[type="checkbox"]:focus-visible {
 
 .respond-review-item-wrong {
   background: var(--rf-danger-bg);
-  border-color: #f4c7c2;
+  border-color: var(--danger-border);
 }
 
 .respond-review-mark {
@@ -847,30 +872,12 @@ input[type="checkbox"]:focus-visible {
     align-items: flex-start;
   }
 
-  .respond-form-column {
-    gap: 12px;
+  .respond-toolbar {
+    margin-bottom: 18px;
   }
 
-  .respond-form-header {
-    padding: 20px 16px 18px;
-    border-radius: 10px;
-  }
-
-  .respond-form-header-row {
-    margin-bottom: 12px;
-  }
-
-  .respond-form-header h1 {
-    font-size: 20px;
-  }
-
-  .respond-form-header p {
-    font-size: 14px;
-  }
-
-  .answer-question-card {
-    padding: 18px 16px;
-    border-radius: 10px;
+  .answer-question {
+    padding: 18px 0;
   }
 
   .answer-question-title {
@@ -886,9 +893,76 @@ input[type="checkbox"]:focus-visible {
   .answer-field,
   .answer-options,
   .answer-scale,
+  .answer-matrix,
   .answer-file-upload {
     margin-left: 0;
     margin-top: 12px;
+  }
+
+  /* Few columns (e.g. a 5-point scale): restack into one full-width option list per row,
+     same visual language as .answer-option-row, instead of squeezing a table onto a phone. */
+  .answer-matrix[data-mobile-mode="stack"] .matrix-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    min-width: 0;
+  }
+
+  .answer-matrix[data-mobile-mode="stack"] .matrix-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* Same specificity as .matrix-row above — must come after it in source so this wins the
+     cascade and actually hides the header row instead of inheriting its display: flex. */
+  .answer-matrix[data-mobile-mode="stack"] .matrix-row-header {
+    display: none;
+  }
+
+  .answer-matrix[data-mobile-mode="stack"] .matrix-row + .matrix-row {
+    border-top: none;
+  }
+
+  .answer-matrix[data-mobile-mode="stack"] .matrix-cell-row-label {
+    padding: 0;
+    font-size: 14.5px;
+    font-weight: 600;
+  }
+
+  .answer-matrix[data-mobile-mode="stack"] .matrix-cell-input {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 10px;
+
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 44px;
+    padding: 11px 12px;
+    border: 1px solid var(--rf-border);
+    border-radius: 8px;
+  }
+
+  .answer-matrix[data-mobile-mode="stack"] .matrix-cell-input-checked {
+    border-color: var(--rf-accent);
+  }
+
+  .answer-matrix[data-mobile-mode="stack"] .matrix-cell-label {
+    display: inline;
+    font-size: 15px;
+    color: var(--rf-text);
+  }
+
+  /* Many columns (e.g. a 1-10 rating): keep the table, just let it scroll horizontally
+     rather than restacking ten options under every row. */
+  .answer-matrix[data-mobile-mode="scroll"] .matrix-cell-row-label {
+    position: sticky;
+    left: 0;
+    background: var(--rf-card);
+  }
+
+  .answer-matrix[data-mobile-mode="scroll"] .matrix-cell {
+    min-width: 56px;
   }
 
   .answer-field,
@@ -942,12 +1016,6 @@ input[type="checkbox"]:focus-visible {
     width: 100%;
     box-sizing: border-box;
     justify-content: space-between;
-  }
-
-  .respond-submit-btn {
-    width: 100%;
-    padding: 13px 24px;
-    font-size: 16px;
   }
 
   .respond-code-input,

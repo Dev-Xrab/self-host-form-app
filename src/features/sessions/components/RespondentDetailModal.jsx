@@ -1,5 +1,5 @@
 import { useState } from "react";
-import Modal from "../../../pages/dashboard-page/Modal";
+import Dialog from "../../../components/Dialog/Dialog";
 import { Icons } from "../../../pages/dashboard-page/icons";
 import logo from "../../../images/logo.png";
 import "./respondent-detail.css";
@@ -19,14 +19,31 @@ function fileNameFromDataUri(dataUri, questionTitle) {
   return ext ? `${base}.${ext}` : base;
 }
 
+// What kind of inline preview (if any) a data: URI supports — drives both the thumbnail
+// shown under a question and what the full-view lightbox renders when it's opened.
+function getFileKind(dataUri) {
+  const mime = /^data:([^;]+);base64,/.exec(dataUri || "")?.[1] || "";
+  if (mime.startsWith("image/")) return "image";
+  if (mime === "application/pdf") return "pdf";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "other";
+}
+
 function isImage(dataUri) {
-  return /^data:image\//.test(dataUri || "");
+  return getFileKind(dataUri) === "image";
 }
 
 export default function RespondentDetailModal({ respondent, onClose, onPrev, onNext, position }) {
   const [editCodeVisible, setEditCodeVisible] = useState(false);
+  const [previewFile, setPreviewFile] = useState(null);
 
   if (!respondent) return null;
+
+  // The lightbox is nested inside this same Dialog rather than a separate one, so its own
+  // Escape/close needs to take priority over the outer modal's — closing the lightbox first,
+  // and only closing the whole respondent view on a second Escape/close once it's gone.
+  const handleClose = () => (previewFile ? setPreviewFile(null) : onClose());
 
   const headerActions = (
     <>
@@ -70,12 +87,12 @@ export default function RespondentDetailModal({ respondent, onClose, onPrev, onN
   );
 
   return (
-    <Modal title={respondent.respondentName || "Respondent"} onClose={onClose} headerActions={headerActions}>
+    <Dialog title={respondent.respondentName || "Respondent"} onClose={handleClose} headerActions={headerActions}>
       <div className="respondent-detail">
         <div className="respondent-detail-print-header">
           <img src={logo} alt="" className="respondent-detail-print-logo" />
           <div>
-            <p className="respondent-detail-print-app">StoneArch</p>
+            <p className="respondent-detail-print-app">Self Host Form</p>
             <h2>{respondent.respondentName || "Anonymous"}</h2>
             <p>
               Score: {respondent.score ?? "—"} / {respondent.maxScore ?? "—"}
@@ -124,24 +141,39 @@ export default function RespondentDetailModal({ respondent, onClose, onPrev, onN
               <div className="respondent-answer-row">
                 <span className="respondent-answer-label">Submitted</span>
                 {b.fileUrl ? (
-                  <a
-                    className="respondent-file-link"
-                    href={b.fileUrl}
-                    download={fileNameFromDataUri(b.fileUrl, b.title)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <Icons.download />
-                    {isImage(b.fileUrl) ? "View / download image" : "Download file"}
-                  </a>
+                  <div className="respondent-file-actions">
+                    {getFileKind(b.fileUrl) !== "other" && (
+                      <button
+                        type="button"
+                        className="respondent-file-link"
+                        onClick={() => setPreviewFile({ url: b.fileUrl, title: b.title, kind: getFileKind(b.fileUrl) })}
+                      >
+                        <Icons.eye />
+                        Preview
+                      </button>
+                    )}
+                    <a
+                      className="respondent-file-link"
+                      href={b.fileUrl}
+                      download={fileNameFromDataUri(b.fileUrl, b.title)}
+                    >
+                      <Icons.download />
+                      Download file
+                    </a>
+                  </div>
                 ) : (
                   <span className="respondent-answer-value">{formatAnswer(b.submittedAnswer)}</span>
                 )}
               </div>
               {b.fileUrl && isImage(b.fileUrl) && (
-                <a href={b.fileUrl} target="_blank" rel="noreferrer" className="respondent-file-preview-link">
+                <button
+                  type="button"
+                  className="respondent-file-preview-link"
+                  onClick={() => setPreviewFile({ url: b.fileUrl, title: b.title, kind: "image" })}
+                  aria-label="View full size image"
+                >
                   <img className="respondent-file-preview" src={b.fileUrl} alt={b.title || "Uploaded file"} />
-                </a>
+                </button>
               )}
 
               {b.gradable && (
@@ -154,6 +186,50 @@ export default function RespondentDetailModal({ respondent, onClose, onPrev, onN
           ))}
         </div>
       </div>
-    </Modal>
+
+      {previewFile && (
+        <div className="respondent-lightbox-overlay" onClick={() => setPreviewFile(null)}>
+          <div className="respondent-lightbox" onClick={(e) => e.stopPropagation()}>
+            <div className="respondent-lightbox-toolbar">
+              <span className="respondent-lightbox-title">{previewFile.title || "Attachment"}</span>
+              <div className="respondent-lightbox-actions">
+                <a
+                  className="respondent-lightbox-download"
+                  href={previewFile.url}
+                  download={fileNameFromDataUri(previewFile.url, previewFile.title)}
+                  aria-label="Download file"
+                  title="Download"
+                >
+                  <Icons.download />
+                </a>
+                <button
+                  type="button"
+                  className="respondent-lightbox-close"
+                  onClick={() => setPreviewFile(null)}
+                  aria-label="Close preview"
+                >
+                  <Icons.close />
+                </button>
+              </div>
+            </div>
+
+            <div className="respondent-lightbox-body">
+              {previewFile.kind === "image" && (
+                <img src={previewFile.url} alt={previewFile.title || "Uploaded file"} className="respondent-lightbox-image" />
+              )}
+              {previewFile.kind === "pdf" && (
+                <iframe src={previewFile.url} title={previewFile.title || "PDF preview"} className="respondent-lightbox-pdf" />
+              )}
+              {previewFile.kind === "video" && (
+                <video src={previewFile.url} controls autoPlay className="respondent-lightbox-video" />
+              )}
+              {previewFile.kind === "audio" && (
+                <audio src={previewFile.url} controls autoPlay className="respondent-lightbox-audio" />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </Dialog>
   );
 }

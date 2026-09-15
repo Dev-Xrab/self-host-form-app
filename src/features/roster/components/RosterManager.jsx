@@ -1,12 +1,23 @@
 import { useState } from "react";
 import { rosterApi } from "../services/rosterApi";
 import { Icons } from "../../../pages/dashboard-page/icons";
+import Checkbox from "../../../components/ui/Checkbox";
+import ConfirmDialog from "../../../components/Dialog/ConfirmDialog";
 
 const norm = (s) => String(s ?? "").trim().toLowerCase();
+const namesInPasteText = (text) =>
+  new Set(
+    text
+      .split("\n")
+      .map((l) => norm(l.split(",")[0]))
+      .filter(Boolean)
+  );
 
-// One student per line: "Name, Student ID, Email" — ID and email are both optional. A
-// field left blank on a re-pasted line leaves that student's existing value alone (so
-// re-pasting an updated list never wipes out an ID/email set some other way); aliases
+// One student per line: "Name, Student ID, Email" — ID and email are both optional, and the
+// pasted text is always what the table shows: a field left blank on a re-paste clears that
+// student's existing value the same way removing it from the line was meant to. studentId/email
+// are sent as "" rather than omitted so an update always overwrites, never merges — otherwise a
+// student whose ID was removed from the pasted list would silently keep their old one. Aliases
 // aren't touched by paste at all.
 async function importRosterText(text, existingStudents) {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -18,8 +29,8 @@ async function importRosterText(text, existingStudents) {
 
     const payload = {
       name: namePart,
-      ...(idPart ? { studentId: idPart } : {}),
-      ...(emailPart ? { email: emailPart } : {}),
+      studentId: idPart || "",
+      email: emailPart || "",
     };
 
     const existing = existingStudents.find((s) => norm(s.name) === norm(namePart));
@@ -44,21 +55,51 @@ export default function RosterManager({ students, onChanged }) {
   const [importedCount, setImportedCount] = useState(null);
   const [removingId, setRemovingId] = useState(null);
   const [removeError, setRemoveError] = useState(null);
+  // Off by default: importRosterText only ever adds/updates the names in the pasted text, so a
+  // quick "add two more students" paste never touches anyone else. Turning this on makes the
+  // paste the whole roster instead of an addition to it — any existing student whose name isn't
+  // in the text gets removed, which is what fixes a paste that went in malformed (like IDs typed
+  // on their own line with no name) without having to hunt down and trash each bad row by hand.
+  const [replaceRest, setReplaceRest] = useState(false);
+  const [pendingRemoval, setPendingRemoval] = useState(null); // Student[] | null
 
-  const handleImport = async () => {
-    if (!pasteText.trim() || importing) return;
+  const runImport = async (toRemove = []) => {
     setImporting(true);
     setImportError(null);
     setImportedCount(null);
     try {
       const count = await importRosterText(pasteText, students);
+      for (const student of toRemove) {
+        await rosterApi.remove(student.id);
+      }
       setImportedCount(count);
-      onChanged();
+      // Reported per removed student (not a bare refresh) for the same reason handleRemove
+      // below does it one at a time — see that comment.
+      if (toRemove.length > 0) toRemove.forEach((student) => onChanged(student));
+      else onChanged();
     } catch (err) {
       setImportError(err.message);
     } finally {
       setImporting(false);
+      setPendingRemoval(null);
     }
+  };
+
+  const handleImport = () => {
+    if (importing) return;
+    // An empty paste is normally a no-op (nothing to import). In replace mode it's meaningful
+    // instead — "the roster is this list" with an empty list means "clear the roster" — so only
+    // bail out here when that mode isn't what would make an empty paste do something.
+    if (!pasteText.trim() && !replaceRest) return;
+    if (replaceRest) {
+      const keep = namesInPasteText(pasteText);
+      const toRemove = students.filter((s) => !keep.has(norm(s.name)));
+      if (toRemove.length > 0) {
+        setPendingRemoval(toRemove);
+        return;
+      }
+    }
+    runImport();
   };
 
   const handleRemove = async (student) => {
@@ -66,7 +107,11 @@ export default function RosterManager({ students, onChanged }) {
     setRemoveError(null);
     try {
       await rosterApi.remove(student.id);
-      onChanged();
+      // Passing the removed student (name + aliases) — not just "something changed" — lets a
+      // caller like GradebookPage hide that identity's row even when it's showing non-roster
+      // respondents too, which a plain refetch of the roster list can't do on its own (the
+      // student is already gone from the response, so there's nothing left to match against).
+      onChanged(student);
     } catch (err) {
       setRemoveError(err.message);
     } finally {
@@ -91,6 +136,12 @@ export default function RosterManager({ students, onChanged }) {
             setImportedCount(null);
           }}
           rows={4}
+        />
+        <Checkbox
+          className="roster-replace-toggle"
+          checked={replaceRest}
+          onChange={(checked) => setReplaceRest(checked)}
+          label="Replace roster with this list (remove students not included)"
         />
         <div className="roster-paste-actions">
           <button type="button" className="dash-primary-btn" onClick={handleImport} disabled={importing}>
@@ -148,6 +199,21 @@ export default function RosterManager({ students, onChanged }) {
           </table>
           {removeError && <p className="dash-form-error">{removeError}</p>}
         </div>
+      )}
+
+      {pendingRemoval && (
+        <ConfirmDialog
+          title="Replace roster"
+          message={
+            !pasteText.trim()
+              ? `The pasted list is empty — this will clear your entire roster, removing all ${students.length} student${students.length === 1 ? "" : "s"}: ${pendingRemoval.map((s) => s.name || "Unnamed").join(", ")}.`
+              : `This list doesn't include ${pendingRemoval.length} student${pendingRemoval.length === 1 ? "" : "s"} currently on the roster — importing will remove ${pendingRemoval.length === 1 ? "them" : "them all"}: ${pendingRemoval.map((s) => s.name || "Unnamed").join(", ")}.`
+          }
+          confirmLabel="Import and remove"
+          busyLabel="Importing…"
+          onCancel={() => setPendingRemoval(null)}
+          onConfirm={() => runImport(pendingRemoval)}
+        />
       )}
     </div>
   );

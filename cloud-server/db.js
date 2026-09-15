@@ -102,6 +102,10 @@ export async function ensureSchema() {
     );
     ALTER TABLE forms ADD COLUMN IF NOT EXISTS google_form_id TEXT;
     CREATE INDEX IF NOT EXISTS idx_forms_owner ON forms(owner_id);
+    -- Backs getFormByGoogleFormId's re-import dedup check (see forms/repository.js) — partial
+    -- since most forms have no google_form_id at all.
+    CREATE INDEX IF NOT EXISTS idx_forms_owner_google ON forms(owner_id, google_form_id)
+      WHERE google_form_id IS NOT NULL;
 
     -- Immutable per-version snapshot, so a device that imported v2 (or a response created
     -- against v2) keeps working even after the owner publishes v3.

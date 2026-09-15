@@ -18,6 +18,7 @@ export function downloadFormAsJson(form) {
       required: !!q.required,
       options: q.options || [],
       scale: q.scale || {},
+      rows: q.rows || [],
       imageUrl: q.imageUrl || null,
       correctAnswerIndex: q.correctAnswerIndex || [],
       correctAnswers: q.correctAnswers || [],

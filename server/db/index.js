@@ -45,6 +45,7 @@ db.exec(`
     required INTEGER NOT NULL DEFAULT 0,
     options TEXT NOT NULL DEFAULT '[]',
     scale TEXT NOT NULL DEFAULT '{}',
+    rows TEXT NOT NULL DEFAULT '[]',
     image_url TEXT,
     correct_answer_index TEXT NOT NULL DEFAULT '[]',
     correct_answers TEXT NOT NULL DEFAULT '[]',
@@ -127,6 +128,22 @@ db.exec(`
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+
+  -- Singleton: this install is signed in to the cloud server as at most one Google account.
+  -- Tokens never leave this table — no API route ever returns access_token/refresh_token to
+  -- the renderer, only the derived connected/email/name status (see server/cloud/routes.js).
+  CREATE TABLE IF NOT EXISTS cloud_account (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    user_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    avatar_url TEXT,
+    access_token TEXT NOT NULL,
+    access_token_expires_at TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
 `);
 
 // Lightweight migration guard: add columns introduced after a user's DB was first created,
@@ -142,6 +159,9 @@ ensureColumn("responses", "device_id", "TEXT");
 ensureColumn("forms", "subject_id", "TEXT");
 ensureColumn("subjects", "is_default", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("questions", "points", "INTEGER NOT NULL DEFAULT 1");
+// Matrix/grid questions' row labels — one shared column list already fits the existing
+// `options` JSON column (each entry becomes {id, label, value} instead of a plain string).
+ensureColumn("questions", "rows", "TEXT NOT NULL DEFAULT '[]'");
 ensureColumn("sessions", "name", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("sessions", "duration_minutes", "INTEGER");
 ensureColumn("sessions", "ends_at", "TEXT");
@@ -153,6 +173,52 @@ ensureColumn("responses", "deadline_at", "TEXT");
 ensureColumn("responses", "edit_code", "TEXT");
 ensureColumn("sessions", "responses_editable", "INTEGER NOT NULL DEFAULT 0");
 
+// Bookkeeping for forms imported from the cloud server — null for locally-authored forms.
+// remote_version pins the local copy to the exact form_versions snapshot it was imported from,
+// so a later edit on the cloud server doesn't silently change a form already in offline use.
+ensureColumn("forms", "remote_form_id", "TEXT");
+ensureColumn("forms", "remote_version", "INTEGER");
+ensureColumn("forms", "owner_user_id", "TEXT");
+
+// UNIQUE (not just indexed): the app-level dedup check in importCentralFormLocally
+// (server/cloud/routes.js — look up by remote_form_id before importing) is a check-then-insert,
+// which is only ever correct up to a race (a double-click, or two near-simultaneous imports).
+// This index turns "two local forms pointing at the same cloud form" from a rare possibility
+// into a constraint violation. NULL is exempt (every locally-authored form has no remote_form_id
+// at all, and SQLite already treats distinct NULLs as non-conflicting, but the WHERE clause makes
+// that intent explicit rather than incidental). Replaces a plain, non-unique index of the same
+// name from an earlier migration — DROP first because CREATE ... IF NOT EXISTS matches by name,
+// not definition, so an install that already has the old plain index would otherwise never
+// actually gain the uniqueness guarantee.
+db.exec("DROP INDEX IF EXISTS idx_forms_remote_form_id;");
+db.exec(
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_forms_remote_form_id ON forms(remote_form_id) WHERE remote_form_id IS NOT NULL;"
+);
+
+// Set only for forms imported from a real Google Form (see server/cloud/routes.js
+// POST /google-forms/:id/import) — lets "Update from Google" (POST /google-forms/:id/refresh)
+// find its way back to the source Drive file id later. Null for every other form.
+ensureColumn("forms", "google_form_id", "TEXT");
+
+// Sync bookkeeping for responses collected under a cloud-linked form (see server/cloud/sync.js).
+// No separate outbox/queue table: these columns on the responses row itself ARE the queue —
+// "pending" rows are exactly the ones sync needs to upload, so there is only one place that can
+// drift out of sync with what actually happened to a response.
+// version: bumped on every finalize (first submit AND resubmit-after-edit) — the optimistic-
+//   concurrency counter the cloud server uses to accept/reject/detect-conflict on upload.
+// form_version: the remote form version this response was answered against (copied from
+//   forms.remote_version at submit time), so a later form edit doesn't retroactively change
+//   what an already-submitted response is considered to have answered.
+// sync_status: 'pending' (needs upload) | 'synced' | 'failed' (rejected or errored — retryable).
+ensureColumn("responses", "version", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("responses", "form_version", "INTEGER");
+ensureColumn("responses", "sync_status", "TEXT NOT NULL DEFAULT 'pending'");
+ensureColumn("responses", "synced_at", "TEXT");
+ensureColumn("responses", "retry_count", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("responses", "sync_error", "TEXT");
+
+db.exec("CREATE INDEX IF NOT EXISTS idx_responses_sync_status ON responses(sync_status);");
+
 // Backfill: sessions/responses created before this migration are already "started"/"submitted"
 // under the old single-shot model — reflect that in the new lifecycle columns instead of
 // leaving them looking unstarted.
@@ -162,5 +228,21 @@ db.exec(`
   UPDATE responses SET started_at = submitted_at WHERE started_at IS NULL AND submitted_at IS NOT NULL;
 `);
 
+// The line above finalizes pre-sync-era responses straight to 'submitted' via raw SQL, bypassing
+// submitResponse() — the only place that bumps `version` off its default 0. That leaves them
+// violating the sync engine's own invariant ("submitted" implies version >= 1, see
+// server/responses/repository.js submitResponse) and permanently unsyncable: the cloud server
+// rejects any version < 1 as "invalid", and no amount of retrying ever changes that version.
+// Idempotent — matches nothing once every such row has been bumped once.
+db.exec(`UPDATE responses SET version = 1 WHERE status = 'submitted' AND version = 0;`);
+
 db.exec("CREATE INDEX IF NOT EXISTS idx_forms_subject_id ON forms(subject_id);");
 db.exec("CREATE INDEX IF NOT EXISTS idx_responses_edit_code ON responses(session_id, edit_code);");
+
+// removed_at: set when a Google Forms structural sync detects this question no longer exists on
+// the live online form and the host chooses "Sync From Online" (see server/forms/questionDiff.js
+// and server/cloud/routes.js POST /google-forms/:id/apply-changes). The row itself is never
+// deleted — response_answers has no foreign key to questions, so nothing there is at risk either
+// way, but keeping the row (with its last-known title/type/options) is what lets analytics still
+// show a removed question's historical answers, labeled instead of just vanishing.
+ensureColumn("questions", "removed_at", "TEXT");

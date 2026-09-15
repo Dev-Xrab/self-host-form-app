@@ -16,6 +16,9 @@ dist-ssr
 server/data/*.sqlite
 server/data/*.sqlite-*
 
+# Cloud server secrets (Google OAuth client secret, DATABASE_URL) — never commit real values.
+cloud-server/.env
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

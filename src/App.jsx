@@ -7,6 +7,7 @@ import RolePage from "./pages/role-page/RolePage";
 import WindowContainer from "./components/Window Container/WindowContainer";
 import FormPage from "./pages/form-page/FormPage";
 import QuestionsPage from "./pages/form-page/QuestionsPage";
+import AllResponsesPage from "./pages/form-page/AllResponsesPage";
 import FormSettingsPage from "./pages/form-page/SettingsPage";
 import DashboardLayout from "./pages/dashboard-page/DashboardLayout";
 import DashboardHome from "./pages/dashboard-page/DashboardHome";
@@ -71,6 +72,7 @@ function App() {
             }
           >
             <Route index element={<QuestionsPage />} />
+            <Route path="responses" element={<AllResponsesPage />} />
             <Route path="settings" element={<FormSettingsPage />} />
           </Route>
           <Route path="/s/:code" element={<RespondForm />} />

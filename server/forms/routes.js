@@ -13,6 +13,8 @@ const QUESTION_TYPES = new Set([
   "date",
   "time",
   "file_upload",
+  "matrix",
+  "matrix_checkbox",
   "section",
 ]);
 

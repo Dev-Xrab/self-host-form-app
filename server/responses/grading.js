@@ -3,6 +3,14 @@ const CHOICE_TYPES = new Set(["multiple_choice", "dropdown"]);
 const normalize = (s) => String(s ?? "").trim().toLowerCase();
 const pointsOf = (question) => Math.max(0, Number(question.points) || 0) || 1;
 
+// A matrix row counts as answered if it has a value (matrix_checkbox: a non-empty array;
+// matrix: any selected column id). Kept in sync with src/lib/matrixQuestions.js's
+// getMatrixMissingRows by convention — this file can't import client code (see top comment).
+function matrixRowAnswered(row, answers, isMultiple) {
+  const a = answers[row.id];
+  return isMultiple ? Array.isArray(a) && a.length > 0 : a !== undefined && a !== null && a !== "";
+}
+
 function isEmptyAnswer(question, value) {
   if (value === undefined || value === null) return true;
   switch (question.type) {
@@ -10,6 +18,17 @@ function isEmptyAnswer(question, value) {
       return !Array.isArray(value) || value.length === 0;
     case "linear_scale":
       return typeof value !== "number" && typeof value !== "string";
+    case "matrix":
+    case "matrix_checkbox": {
+      const rows = Array.isArray(question.rows) ? question.rows : [];
+      if (rows.length === 0) return true;
+      const answers = value && typeof value === "object" ? value : {};
+      const isMultiple = question.type === "matrix_checkbox";
+      const requireAll = question.scale?.requireAllRows !== false;
+      return requireAll
+        ? rows.some((r) => !matrixRowAnswered(r, answers, isMultiple))
+        : rows.every((r) => !matrixRowAnswered(r, answers, isMultiple));
+    }
     default:
       return String(value).trim() === "";
   }
@@ -84,6 +103,24 @@ function submittedAnswerText(question, value) {
   if (question.type === "file_upload") {
     return "File attached";
   }
+  if (question.type === "matrix" || question.type === "matrix_checkbox") {
+    const rows = Array.isArray(question.rows) ? question.rows : [];
+    const columns = Array.isArray(question.options) ? question.options : [];
+    const colLabel = (colId) => columns.find((c) => c.id === colId)?.label ?? colId;
+    const answers = value && typeof value === "object" ? value : {};
+    if (rows.length === 0) return null;
+    return rows
+      .map((row) => {
+        const a = answers[row.id];
+        const answerText = Array.isArray(a)
+          ? a.map(colLabel).join(", ") || "No answer"
+          : a !== undefined && a !== null && a !== ""
+          ? colLabel(a)
+          : "No answer";
+        return `${row.label}: ${answerText}`;
+      })
+      .join("; ");
+  }
   return String(value);
 }
 
@@ -115,12 +152,19 @@ export function buildAnswerReview(questions, answers) {
 export function buildRespondentSummary(questions, answers, { includeChoices = false } = {}) {
   return questions
     .filter((q) => q.type !== "section")
-    .map((q) => ({
-      title: q.title,
-      type: q.type,
-      submittedAnswer: submittedAnswerText(q, answers[q.id]) ?? "No answer",
-      choices: includeChoices && q.options?.length ? q.options : null,
-    }));
+    .map((q) => {
+      // Matrix columns are {id, label, value} objects, not plain strings like every other
+      // option-based type's `options` — reduce to labels so this reads the same as any
+      // other question's choice list.
+      const isMatrix = q.type === "matrix" || q.type === "matrix_checkbox";
+      const choiceLabels = isMatrix ? (q.options || []).map((c) => c.label) : q.options;
+      return {
+        title: q.title,
+        type: q.type,
+        submittedAnswer: submittedAnswerText(q, answers[q.id]) ?? "No answer",
+        choices: includeChoices && choiceLabels?.length ? choiceLabels : null,
+      };
+    });
 }
 
 // Full per-question breakdown for the host-facing detailed respondent view: every

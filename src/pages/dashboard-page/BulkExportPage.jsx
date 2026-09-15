@@ -1,29 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useSessions } from "../../features/sessions/hooks/useSessions";
 import { sessionsApi } from "../../features/sessions/services/sessionsApi";
 import { useSubjects } from "../../features/subjects/hooks/useSubjects";
+import { groupBySubjects } from "../../features/subjects/utils/groupBySubjects";
 import { exportSessionsToWorkbook } from "../../features/sessions/utils/export";
+import Checkbox from "../../components/ui/Checkbox";
 import { Icons } from "./icons";
 import PageHeader from "./PageHeader";
-
-const groupBySubject = (sessions, subjects) => {
-  const subjectById = new Map(subjects.map((s) => [s.id, s]));
-  const map = new Map();
-  sessions.forEach((s) => {
-    const label = s.subjectId && subjectById.has(s.subjectId) ? subjectById.get(s.subjectId).name : "No subject";
-    if (!map.has(label)) map.set(label, []);
-    map.get(label).push(s);
-  });
-  return Array.from(map.entries());
-};
-
-const SectionCheckbox = ({ checked, indeterminate, onChange }) => {
-  const ref = useRef(null);
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = indeterminate;
-  }, [indeterminate]);
-  return <input ref={ref} type="checkbox" className="dash-checkbox" checked={checked} onChange={onChange} />;
-};
 
 export default function BulkExportPage() {
   const { sessions: allSessions, loading } = useSessions();
@@ -37,7 +20,7 @@ export default function BulkExportPage() {
   const searchedSessions = endedSessions.filter((s) =>
     `${s.name || ""} ${s.formTitle || ""}`.toLowerCase().includes(query.toLowerCase())
   );
-  const sections = groupBySubject(searchedSessions, subjects);
+  const sections = groupBySubjects(searchedSessions, subjects, (s) => s.subjectId);
 
   const toggleSession = (id) => {
     setSelected((prev) => {
@@ -130,37 +113,40 @@ export default function BulkExportPage() {
         ) : sections.length === 0 ? (
           <p className="dash-empty">No sessions match "{query}".</p>
         ) : (
-          sections.map(([label, sectionSessions]) => {
+          sections.map(({ subject, items: sectionSessions }) => {
+            const label = subject?.name || "General";
             const ids = sectionSessions.map((s) => s.id);
             const selectedCount = ids.filter((id) => selected.has(id)).length;
 
             return (
-              <div className="dash-card bulk-section" key={label}>
+              <div className="dash-card bulk-section" key={subject?.id || "unsorted"}>
                 <div className="bulk-section-header">
-                  <label className="bulk-checkbox-row">
-                    <SectionCheckbox
+                  <div className="bulk-checkbox-row">
+                    <Checkbox
                       checked={selectedCount === ids.length}
                       indeterminate={selectedCount > 0 && selectedCount < ids.length}
                       onChange={() => toggleSection(sectionSessions)}
+                      label={<span className="bulk-section-title">{label}</span>}
                     />
-                    <span className="bulk-section-title">{label}</span>
-                  </label>
+                  </div>
                   <span className="dash-item-meta">
                     {sectionSessions.length} session{sectionSessions.length === 1 ? "" : "s"}
                   </span>
                 </div>
 
                 {sectionSessions.map((s) => (
-                  <label className="bulk-checkbox-row bulk-quiz-row" key={s.id}>
-                    <input
-                      type="checkbox"
-                      className="dash-checkbox"
+                  <div className="bulk-checkbox-row bulk-quiz-row" key={s.id}>
+                    <Checkbox
                       checked={selected.has(s.id)}
                       onChange={() => toggleSession(s.id)}
+                      label={
+                        <span className="bulk-row-text">
+                          <span className="quiz-name">{s.name || "Untitled session"}</span>
+                          <span className="dash-item-meta">{s.formTitle} · {s.submittedCount} submitted</span>
+                        </span>
+                      }
                     />
-                    <span className="quiz-name">{s.name || "Untitled session"}</span>
-                    <span className="dash-item-meta">{s.formTitle} · {s.submittedCount} submitted</span>
-                  </label>
+                  </div>
                 ))}
               </div>
             );

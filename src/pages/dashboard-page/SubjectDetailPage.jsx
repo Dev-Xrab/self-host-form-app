@@ -6,9 +6,9 @@ import { useSubjects } from "../../features/subjects/hooks/useSubjects";
 import { subjectsApi } from "../../features/subjects/services/subjectsApi";
 import { Icons } from "./icons";
 import { Monogram } from "./Monogram";
-import Modal from "./Modal";
+import Dialog from "../../components/Dialog/Dialog";
 import DeleteSubjectModal from "./DeleteSubjectModal";
-import ConfirmModal from "./ConfirmModal";
+import ConfirmDialog from "../../components/Dialog/ConfirmDialog";
 
 const emptyForm = { name: "", description: "" };
 
@@ -187,7 +187,7 @@ export default function SubjectDetailPage() {
       </div>
 
       {showModal && (
-        <Modal title="Add Form" onClose={() => setShowModal(false)}>
+        <Dialog title="Add Form" onClose={() => setShowModal(false)}>
           <form className="dash-form" onSubmit={handleSubmit}>
             <label className="dash-form-field">
               <span className="dash-form-label">Form name</span>
@@ -223,11 +223,11 @@ export default function SubjectDetailPage() {
               </button>
             </div>
           </form>
-        </Modal>
+        </Dialog>
       )}
 
       {showEditModal && (
-        <Modal title="Edit Subject" onClose={() => setShowEditModal(false)}>
+        <Dialog title="Edit Subject" onClose={() => setShowEditModal(false)}>
           <form className="dash-form" onSubmit={handleEditSubmit}>
             <label className="dash-form-field">
               <span className="dash-form-label">Subject name</span>
@@ -263,7 +263,7 @@ export default function SubjectDetailPage() {
               </button>
             </div>
           </form>
-        </Modal>
+        </Dialog>
       )}
 
       {showDeleteSubject && subject && (
@@ -275,7 +275,7 @@ export default function SubjectDetailPage() {
       )}
 
       {deleteFormTarget && (
-        <ConfirmModal
+        <ConfirmDialog
           title="Delete Form"
           message={`Delete "${deleteFormTarget.title || "Untitled form"}"? This permanently deletes it along with every session and response under it.`}
           confirmLabel="Delete Form"

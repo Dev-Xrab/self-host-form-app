@@ -1,34 +1,105 @@
 import { useEffect, useState } from "react";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
+import { addGridSheet, triggerDownload } from "../../features/sessions/utils/export";
 import { useSessions } from "../../features/sessions/hooks/useSessions";
 import { sessionsApi } from "../../features/sessions/services/sessionsApi";
 import { useRoster, matchStudentByName } from "../../features/roster/hooks/useRoster";
 import RosterManager from "../../features/roster/components/RosterManager";
+import Checkbox from "../../components/ui/Checkbox";
 import { Icons } from "./icons";
 import PageHeader from "./PageHeader";
+
+const norm = (s) => String(s ?? "").trim().toLowerCase();
 
 const average = (values) => {
   if (values.length === 0) return null;
   return Math.round((values.reduce((sum, v) => sum + v, 0) / values.length) * 10) / 10;
 };
 
-const percentage = (score, max) => (max ? Math.round((score / max) * 1000) / 10 : null);
+const percentage = (score, max) => (score != null && max ? Math.round((score / max) * 1000) / 10 : null);
 
-function exportGradebook(sessions, rows) {
-  const data = rows.map((row) => {
-    const out = { Respondent: row.name };
-    if (row.studentId) out["Student ID"] = row.studentId;
-    sessions.forEach((s) => {
-      const cell = row.scores[s.id];
-      out[s.name || s.formTitle] = cell ? `${cell.score}/${cell.maxScore}` : "";
-    });
-    out.Average = row.averagePct != null ? `${row.averagePct}%` : "";
-    return out;
-  });
-  const sheet = XLSX.utils.json_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, sheet, "Gradebook");
-  XLSX.writeFile(wb, `gradebook-${new Date().toISOString().slice(0, 10)}.xlsx`);
+// A scores[sessionId] entry existing only means "this respondent has a row for this session" —
+// it doesn't mean there's a real score, e.g. a response imported from Google Forms always has
+// score/maxScore stored as null (see cloud-server/google-forms/repository.js — Google gives no
+// grading data). Formatting that as `null/null` was the actual bug; null here means "no score to
+// show", same as no entry at all.
+function formatScore(cell) {
+  if (!cell || cell.score == null || cell.maxScore == null) return null;
+  return `${cell.score}/${cell.maxScore}`;
+}
+
+// The same session's real scores all share one max — take the first one found rather than
+// requiring the caller to have tracked it separately.
+function sessionMaxScore(session, rows) {
+  for (const row of rows) {
+    const maxScore = row.scores[session.id]?.maxScore;
+    if (maxScore != null) return maxScore;
+  }
+  return null;
+}
+
+// A blank cell in a spreadsheet is one bit of information ("nothing here") standing in for at
+// least three different facts: this respondent never attempted this session, they did but there's
+// no score to show (e.g. a Google Forms import — Google carries no grading data), or — distinct
+// from both — they're a roster student who's owed a real 0 for skipping it (see the rows builder
+// above). A real gradebook export needs those to read differently, not collapse into the same
+// empty cell, so this writes each as its own explicit word instead of "" — and a real score stays
+// a real NUMBER (not a "score/max" string) so SUM/AVERAGE/conditional formatting in Excel still
+// work on the column, the same reason the Average column below is a formatted percentage, not text.
+function sessionCellValue(row, sessionId) {
+  const cell = row.scores[sessionId];
+  if (!cell) return "Not submitted";
+  if (cell.score == null || cell.maxScore == null) return "Ungraded";
+  return cell.score;
+}
+
+async function exportGradebook(sessions, rows) {
+  const header = ["Respondent", "Student ID", "Roster Status", ...sessions.map((s) => s.name || s.formTitle), "Average"];
+  const pointsPossibleRow = [
+    "Points possible",
+    "",
+    "",
+    ...sessions.map((s) => sessionMaxScore(s, rows) ?? ""),
+    "",
+  ];
+  const dataRows = rows.map((row) => [
+    row.name,
+    row.studentId || "",
+    row.matched ? "Roster" : "Not on roster",
+    ...sessions.map((s) => sessionCellValue(row, s.id)),
+    row.averagePct != null ? row.averagePct / 100 : "No graded sessions",
+  ]);
+  const grid = [header, pointsPossibleRow, ...dataRows];
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Self Host Form";
+  wb.created = new Date();
+  const infoLines = [
+    "Gradebook",
+    `Sessions: ${sessions.length}`,
+    `Respondents: ${rows.length}`,
+    `Exported: ${new Date().toLocaleString()}`,
+  ];
+  // skipBandRows: 1 carves the "Points possible" row out of the striped respondent rows below it,
+  // the same technique exportSessionsToWorkbook already uses for its "Correct Answer"/"Points"
+  // answer-key rows (see features/sessions/utils/export.js buildAnswersGrid) — reused here rather
+  // than reinvented.
+  const sheet = addGridSheet(wb, "Gradebook", grid, { infoLines, skipBandRows: 1 });
+
+  const headerRowIndex = sheet.rowCount - grid.length + 1;
+  sheet.getRow(headerRowIndex + 1).font = { bold: true, color: { argb: "FF37352F" } };
+
+  const averageColumn = header.length;
+  for (let r = headerRowIndex + 2; r <= sheet.rowCount; r++) {
+    const cell = sheet.getRow(r).getCell(averageColumn);
+    if (typeof cell.value === "number") cell.numFmt = "0.0%";
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  triggerDownload(
+    new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+    `gradebook-${new Date().toISOString().slice(0, 10)}.xlsx`
+  );
 }
 
 export default function GradebookPage() {
@@ -41,6 +112,14 @@ export default function GradebookPage() {
   const [respondentsBySession, setRespondentsBySession] = useState({});
   const [fetching, setFetching] = useState(false);
   const [includeNonRoster, setIncludeNonRoster] = useState(false);
+  // Names/aliases of students removed from the roster this session — a response someone already
+  // submitted doesn't disappear when the roster entry does, so once "Include non-roster
+  // respondents" is on it would otherwise keep showing that respondent's row, just relabeled
+  // "Not on roster" instead of gone. This set is what makes removal actually mean "gone from the
+  // table", not just "gone from the roster". Session-only (not persisted): a full page reload
+  // has no way to tell "used to be on the roster" from "was always a guest" apart, since the
+  // roster row itself is really deleted.
+  const [hiddenIdentities, setHiddenIdentities] = useState(() => new Set());
 
   const filteredSessions = endedSessions.filter((s) =>
     `${s.name || ""} ${s.formTitle || ""}`.toLowerCase().includes(query.toLowerCase())
@@ -55,8 +134,33 @@ export default function GradebookPage() {
       .finally(() => setFetching(false));
   }, [selectedIds]);
 
+  // If a name/alias that was hidden (because its roster entry got removed) shows up on the
+  // roster again — re-pasted, or a different student added under the same name — it's back to
+  // being a real roster match and must stop being suppressed, or a future matched row with that
+  // exact name would be wrongly hidden too.
+  useEffect(() => {
+    setHiddenIdentities((prev) => {
+      if (prev.size === 0) return prev;
+      const current = new Set();
+      students.forEach((s) => {
+        current.add(norm(s.name));
+        (s.aliases || []).forEach((a) => current.add(norm(a)));
+      });
+      const next = new Set([...prev].filter((n) => !current.has(n)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [students]);
+
   const toggleSession = (id) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const handleRosterChanged = (removedStudent) => {
+    if (removedStudent) {
+      const identities = [removedStudent.name, ...(removedStudent.aliases || [])].map(norm).filter(Boolean);
+      setHiddenIdentities((prev) => new Set([...prev, ...identities]));
+    }
+    refreshRoster();
   };
 
   // One row per distinct student across the selected sessions. A respondent's typed
@@ -113,11 +217,15 @@ export default function GradebookPage() {
       .sort((a, b) => a.name.localeCompare(b.name));
   })();
 
-  // With no roster entered, there's nothing to scope to — show/export everyone. Once
-  // students are on the roster, only they appear (both on screen and in the export)
-  // unless the host explicitly opts back in via the toggle.
   const hasRoster = students.length > 0;
-  const displayRows = hasRoster && !includeNonRoster ? rows.filter((r) => r.matched) : rows;
+  // Scoped to the roster unless the host explicitly opts back in via the toggle — including
+  // when the roster is empty (e.g. the last student was just removed), which should show an
+  // empty table, not silently fall back to "show everyone" the way a `hasRoster &&` guard here
+  // previously did. The hiddenIdentities filter applies either way: a respondent whose roster
+  // entry was just removed shouldn't reappear just because "Include non-roster respondents" is on.
+  const displayRows = (includeNonRoster ? rows : rows.filter((r) => r.matched)).filter(
+    (r) => !hiddenIdentities.has(norm(r.name))
+  );
 
   return (
     <>
@@ -131,7 +239,7 @@ export default function GradebookPage() {
         <div className="dash-card gradebook-roster-card">
           <span className="dashboard-card-label">Roster</span>
           <div className="gradebook-roster-panel">
-            <RosterManager students={students} onChanged={refreshRoster} />
+            <RosterManager students={students} onChanged={handleRosterChanged} />
           </div>
 
           <span className="dashboard-card-label">Sessions</span>
@@ -154,16 +262,18 @@ export default function GradebookPage() {
           ) : (
             <div className="gradebook-session-picker">
               {filteredSessions.map((s) => (
-                <label className="bulk-checkbox-row" key={s.id}>
-                  <input
-                    type="checkbox"
-                    className="dash-checkbox"
+                <div className="bulk-checkbox-row" key={s.id}>
+                  <Checkbox
                     checked={selectedIds.includes(s.id)}
                     onChange={() => toggleSession(s.id)}
+                    label={
+                      <span className="bulk-row-text">
+                        <span className="quiz-name">{s.name || "Untitled session"}</span>
+                        <span className="dash-item-meta">{s.formTitle} · {s.submittedCount} submitted</span>
+                      </span>
+                    }
                   />
-                  <span className="quiz-name">{s.name || "Untitled session"}</span>
-                  <span className="dash-item-meta">{s.formTitle} · {s.submittedCount} submitted</span>
-                </label>
+                </div>
               ))}
             </div>
           )}
@@ -179,15 +289,12 @@ export default function GradebookPage() {
 
               <div className="bulk-export-bar-actions">
                 {hasRoster && (
-                  <label className="gradebook-roster-toggle">
-                    <input
-                      type="checkbox"
-                      className="dash-checkbox"
-                      checked={includeNonRoster}
-                      onChange={(e) => setIncludeNonRoster(e.target.checked)}
-                    />
-                    Include non-roster respondents
-                  </label>
+                  <Checkbox
+                    className="gradebook-roster-toggle"
+                    label="Include non-roster respondents"
+                    checked={includeNonRoster}
+                    onChange={(checked) => setIncludeNonRoster(checked)}
+                  />
                 )}
 
                 <button
@@ -227,14 +334,21 @@ export default function GradebookPage() {
                       </tr>
                     ) : (
                       displayRows.map((row) => (
-                        <tr key={row.matched ? `s-${row.studentId || row.name}` : row.name}>
+                        <tr
+                          key={row.matched ? `s-${row.studentId || row.name}` : row.name}
+                          className={row.matched ? "" : "gradebook-row-unmatched"}
+                        >
                           <td>
                             {row.name}
-                            {row.matched && <span className="gradebook-roster-badge">Roster</span>}
+                            {row.matched ? (
+                              <span className="gradebook-roster-badge">Roster</span>
+                            ) : (
+                              <span className="gradebook-roster-badge gradebook-roster-badge-muted">Not on roster</span>
+                            )}
                           </td>
                           {selectedSessions.map((s) => (
                             <td key={s.id} className="gradebook-score-cell">
-                              {row.scores[s.id] ? `${row.scores[s.id].score}/${row.scores[s.id].maxScore}` : "—"}
+                              {formatScore(row.scores[s.id]) ?? "—"}
                             </td>
                           ))}
                           <td className="gradebook-score-cell gradebook-average-cell">

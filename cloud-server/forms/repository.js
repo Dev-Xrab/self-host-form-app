@@ -60,6 +60,24 @@ export async function getFormForOwner(ownerId, formId, version) {
   return { ...rowToFormDetail(rows[0]), version: rows[0].snapshot_version };
 }
 
+// Dedup guard for "Import Google Form" (see google-forms/routes.js POST /:id/import) — an
+// owner can only ever have one cloud form per source Drive file. Checked before creating
+// anything, the same way importCentralFormLocally checks remote_form_id on the local side
+// (server/cloud/routes.js) — without this, re-importing (or importing from a second device)
+// mints a brand-new form and re-pulls every response as if none of it existed yet.
+export async function getFormByGoogleFormId(ownerId, googleFormId) {
+  const { rows } = await pool.query(
+    `SELECT f.id, f.title, f.description, f.settings, f.current_version, f.updated_at, f.google_form_id,
+            fv.version AS snapshot_version, fv.questions
+     FROM forms f
+     JOIN form_versions fv ON fv.form_id = f.id AND fv.version = f.current_version
+     WHERE f.owner_id = $1 AND f.google_form_id = $2`,
+    [ownerId, googleFormId]
+  );
+  if (!rows[0]) return null;
+  return { ...rowToFormDetail(rows[0]), version: rows[0].snapshot_version };
+}
+
 // Every published snapshot for a form, newest first — powers the version-picker dropdown on
 // "Import from Cloud" (defaults to latest, but lets the host pick an older one). Ownership is
 // enforced via the EXISTS subquery rather than a join, since form_versions itself carries no

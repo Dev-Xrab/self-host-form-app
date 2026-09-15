@@ -16,7 +16,7 @@ export default function RolePage() {
                   className="host-login-illustration"
                   style={{ width: "50px", height: "50px", paddingBottom: "10px" }}
                 />
-          <h1>StoneArch</h1>
+          <h1>Self Host Form</h1>
           <p className="role-page-subtitle">
             Build forms your way, host them yourself, and keep your data locally.
           </p>

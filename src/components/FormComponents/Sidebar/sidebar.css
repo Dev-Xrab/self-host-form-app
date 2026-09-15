@@ -12,7 +12,7 @@
   box-sizing: border-box;
 
   background: #fbfbfa;
-  border-right: 1px solid #e9e9e7;
+  border-right: 1px solid var(--border);
 
   font-family: Inter, sans-serif;
 }
@@ -39,7 +39,7 @@
 
   padding: 12px;
   box-sizing: border-box;
-  border-top: 1px solid #e9e9e7;
+  border-top: 1px solid var(--border);
 }
 
 .form-sidebar-save:disabled {
@@ -49,7 +49,7 @@
 
 .form-sidebar-save-error {
   font-size: 12px;
-  color: #c0392b;
+  color: var(--danger);
   text-align: center;
 }
 
@@ -62,27 +62,33 @@
 
   font-size: 15px;
   font-weight: 600;
-  color: #37352f;
+  color: var(--text);
 }
 
 .form-sidebar-brand-link {
   text-decoration: none;
   border-radius: 5px;
+  outline: none;
 }
 
 .form-sidebar-brand-link:hover {
   background: #efefed;
 }
 
+.form-sidebar-brand-link:focus-visible {
+  outline: 2px solid #2383e2;
+  outline-offset: 1px;
+}
+
 .form-sidebar-back-icon {
   width: 16px;
   height: 16px;
-  color: #9b9a97;
+  color: var(--text-tertiary);
 }
 
 .form-sidebar-save-note {
   font-size: 12px;
-  color: #787774;
+  color: var(--text-secondary);
   text-align: center;
 }
 
@@ -95,20 +101,29 @@
 .form-sidebar-nav-item {
   padding: 7px 8px;
   border-radius: 5px;
+  outline: none;
 
   font-size: 13.5px;
   font-weight: 500;
-  color: #787774;
+  color: var(--text-secondary);
   text-decoration: none;
 }
 
 .form-sidebar-nav-item:hover {
   background: #efefed;
-  color: #37352f;
+  color: var(--text);
+}
+
+/* Only for keyboard focus (Tab), not a mouse click — replaces the browser's default focus
+   ring, which otherwise renders as a jarring gold/orange box here. */
+.form-sidebar-nav-item:focus-visible {
+  outline: 2px solid #2383e2;
+  outline-offset: 1px;
 }
 
 .form-sidebar-nav-item-active {
-  color: #37352f;
+  background: #efefed;
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -125,7 +140,7 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: #9b9a97;
+  color: var(--text-tertiary);
 }
 
 .form-sidebar-types {
@@ -146,7 +161,7 @@
 
   font-family: Inter, sans-serif;
   font-size: 13.5px;
-  color: #37352f;
+  color: var(--text);
   text-align: left;
   cursor: pointer;
 }
@@ -155,7 +170,7 @@
   width: 16px;
   height: 16px;
   flex-shrink: 0;
-  color: #787774;
+  color: var(--text-secondary);
 }
 
 .form-sidebar-type-btn:hover {
@@ -165,7 +180,7 @@
 .form-sidebar-type-divider {
   height: 1px;
   margin: 6px 8px;
-  background: #e9e9e7;
+  background: var(--border);
 }
 
 .form-sidebar-outline {
@@ -177,7 +192,7 @@
   padding: 4px 8px;
 
   font-size: 12.5px;
-  color: #9b9a97;
+  color: var(--text-tertiary);
 }
 
 .form-sidebar-outline-list {
@@ -198,21 +213,21 @@
 
   font-family: Inter, sans-serif;
   font-size: 13px;
-  color: #787774;
+  color: var(--text-secondary);
   text-align: left;
   cursor: pointer;
 }
 
 .form-sidebar-outline-item:hover {
   background: #efefed;
-  color: #37352f;
+  color: var(--text);
 }
 
 .form-sidebar-outline-index {
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 600;
-  color: #9b9a97;
+  color: var(--text-tertiary);
 }
 
 .form-sidebar-outline-title {
@@ -224,18 +239,18 @@
 .form-sidebar-outline-item-section {
   margin-top: 4px;
   font-weight: 600;
-  color: #37352f;
+  color: var(--text);
 }
 
 .form-sidebar-outline-item-section:hover {
-  color: #37352f;
+  color: var(--text);
 }
 
 .form-sidebar-outline-section-icon {
   flex-shrink: 0;
   width: 13px;
   height: 13px;
-  color: #9b9a97;
+  color: var(--text-tertiary);
 }
 
 .form-sidebar-save {
@@ -245,8 +260,8 @@
   border: none;
   border-radius: 6px;
 
-  background: #000;
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-contrast);
 
   font-family: Inter, sans-serif;
   font-size: 13.5px;
@@ -255,16 +270,17 @@
 }
 
 .form-sidebar-save:hover {
-  background: #333;
+  background: var(--text);
+  opacity: 0.85;
 }
 
 .form-sidebar-mode-toggle {
   display: flex;
   gap: 4px;
-  border: 1px solid #e9e9e7;
+  border: 1px solid var(--border);
   border-radius: 5px;
   padding: 2px;
-  background: #fff;
+  background: var(--surface-card);
 }
 
 .mode-btn {
@@ -273,7 +289,7 @@
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: #787774;
+  color: var(--text-secondary);
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
@@ -282,12 +298,12 @@
 
 .mode-btn:hover {
   background: #f0f0f0;
-  color: #37352f;
+  color: var(--text);
 }
 
 .mode-btn-active {
-  background: #37352f;
-  color: #fff;
+  background: var(--text);
+  color: var(--accent-contrast);
 }
 
 @media (max-width: 900px) {
@@ -296,7 +312,7 @@
     height: auto;
     position: static;
     border-right: none;
-    border-bottom: 1px solid #e9e9e7;
+    border-bottom: 1px solid var(--border);
   }
 
   .form-sidebar-scroll {

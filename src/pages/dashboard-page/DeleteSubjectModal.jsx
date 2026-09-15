@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import Modal from "./Modal";
+import Dialog from "../../components/Dialog/Dialog";
 
 const COUNTDOWN_SECONDS = 5;
 
@@ -33,7 +33,7 @@ export default function DeleteSubjectModal({ subject, onCancel, onConfirm }) {
   };
 
   return (
-    <Modal title="Delete Subject" onClose={onCancel}>
+    <Dialog title="Delete Subject" onClose={onCancel}>
       <div className="dash-form delete-subject-form">
         <p className="dash-form-label">
           Delete "{subject.name}"{subject.formCount > 0 && ` and its ${subject.formCount} form${subject.formCount === 1 ? "" : "s"}`}?
@@ -88,6 +88,6 @@ export default function DeleteSubjectModal({ subject, onCancel, onConfirm }) {
           </button>
         </div>
       </div>
-    </Modal>
+    </Dialog>
   );
 }

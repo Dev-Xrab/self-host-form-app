@@ -11,10 +11,15 @@ import {
 
 export const publicRouter = Router();
 
+// A question a Google structural sync marked removed (see server/forms/questionDiff.js) is kept
+// server-side so its past answers stay labeled in All Responses, but a respondent filling out the
+// form now must never see or be asked to answer it.
 function stripAnswerKeys(form) {
   return {
     ...form,
-    questions: form.questions.map(({ correctAnswerIndex: _a, correctAnswers: _b, ...q }) => q),
+    questions: form.questions
+      .filter((q) => !q.removedAt)
+      .map(({ correctAnswerIndex: _a, correctAnswers: _b, ...q }) => q),
   };
 }
 
@@ -46,7 +51,7 @@ function canStillSubmit(response, session) {
 }
 
 function answerableQuestionsOf(form) {
-  return form.questions.filter((q) => q.type !== "section");
+  return form.questions.filter((q) => q.type !== "section" && !q.removedAt);
 }
 
 function joinedPayload(session, response, form) {
@@ -222,7 +227,12 @@ publicRouter.post("/responses/:id/submit", (req, res) => {
   );
   const { score, maxScore } = scoreResponse(answerableQuestions, cleanedAnswers);
 
-  const saved = responsesRepo.submitResponse(response.id, { answers: cleanedAnswers, score, maxScore });
+  const saved = responsesRepo.submitResponse(response.id, {
+    answers: cleanedAnswers,
+    score,
+    maxScore,
+    formVersion: form.remoteVersion,
+  });
   if (saved === "already_submitted") {
     return res.status(409).json({ error: "This response has already been submitted." });
   }

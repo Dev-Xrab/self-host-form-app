@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import JSZip from "jszip";
 
 const sanitizeSheetName = (name) => name.replace(/[:\\/?*[\]]/g, "").trim().slice(0, 31) || "Sheet";
@@ -36,18 +36,91 @@ function dataUriToBytes(dataUri) {
   return bytes;
 }
 
-// One question per row, one respondent per column — easier to scan/compare answers across
-// a class than the old normalized (respondent, question) row-per-pair layout. Every
-// respondent in a session answers the same form, so breakdown order/length lines up
-// question-for-question across respondents (including ones who never submitted, whose
-// unanswered questions just come back blank).
+// StoneArch's own dark accent (#37352f) and a light neutral for banding — matches the app's own
+// visual language (dashboard-page.css) rather than a generic spreadsheet look.
+const HEADER_FILL = "FF37352F";
+const HEADER_FONT = "FFFFFFFF";
+const BAND_FILL = "FFF7F7F5";
+const BORDER_COLOR = "FFE9E9E7";
+const THIN_BORDER = { style: "thin", color: { argb: BORDER_COLOR } };
+
+// Bold white-on-dark header row, a frozen top row so it stays visible while scrolling, and
+// column widths sized from actual content instead of Excel's default fixed 8.43 — the concrete
+// "professional format" gap the plain header-only sheet had before.
+function styleHeaderRow(row) {
+  row.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: HEADER_FONT } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_FILL } };
+    cell.alignment = { vertical: "middle" };
+    cell.border = { bottom: THIN_BORDER };
+  });
+  row.height = 20;
+}
+
+function autoSizeColumns(sheet, grid, { min = 10, max = 48 } = {}) {
+  const widths = [];
+  grid.forEach((row) => {
+    row.forEach((value, i) => {
+      const len = String(value ?? "").length;
+      widths[i] = Math.max(widths[i] || min, Math.min(max, len + 2));
+    });
+  });
+  widths.forEach((w, i) => {
+    sheet.getColumn(i + 1).width = w;
+  });
+}
+
+// Exported for reuse by any other client-side XLSX export in the app (see GradebookPage.jsx) —
+// one shared "professional format" look (dark header, banded rows, sized columns) instead of
+// each export screen reinventing its own styling. `infoLines` (form title / subject / export
+// date / response count, etc.) renders as a small bold block above the header row instead of
+// leaving every export as a bare column-headers-only sheet.
+export function addGridSheet(wb, sheetName, grid, { bandedFrom, skipBandRows = 0, infoLines = [] } = {}) {
+  const sheet = wb.addWorksheet(sheetName);
+
+  infoLines.forEach((line, i) => {
+    const row = sheet.addRow([line]);
+    row.font = { bold: true, size: i === 0 ? 13 : 11, color: { argb: "FF37352F" } };
+  });
+  if (infoLines.length) sheet.addRow([]);
+
+  const headerRowIndex = sheet.rowCount + 1;
+  grid.forEach((row) => sheet.addRow(row));
+  styleHeaderRow(sheet.getRow(headerRowIndex));
+  autoSizeColumns(sheet, grid);
+  sheet.views = [{ state: "frozen", ySplit: headerRowIndex }];
+
+  // Light row banding from the row after the header on, and a thin border under every cell —
+  // makes a wide answers grid (many respondent columns) far easier to scan than an unstyled sheet.
+  // skipBandRows carves out N rows right after the header (e.g. a "Correct Answer"/"Points"
+  // answer key) that should read as fixed reference rows, not part of the striped data below.
+  const bandStart = bandedFrom ?? headerRowIndex + skipBandRows;
+  for (let r = bandStart + 1; r <= sheet.rowCount; r++) {
+    const row = sheet.getRow(r);
+    row.eachCell({ includeEmpty: true }, (cell) => {
+      cell.border = { bottom: THIN_BORDER };
+      if ((r - bandStart) % 2 === 0) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: BAND_FILL } };
+      }
+    });
+  }
+  return sheet;
+}
+
+// One respondent per row, one question per column — matches the shape most graders expect from
+// a form export (Google Forms' own response sheet works the same way): scroll down to see more
+// respondents, scroll right to see more questions. A question's correct answer/points apply to
+// every respondent, not to one row, so they get two small header-adjacent rows of their own
+// ("Correct Answer" / "Points") rather than a per-respondent column, and are only included at
+// all when at least one question on this form is actually gradable.
 //
-// A file-upload answer isn't text — its raw value is a data: URI (see grading.js). The free
-// xlsx library used here can't embed real image/file objects into a sheet, so instead the
-// actual bytes are pulled out into `fileEntries` (to be zipped up alongside the workbook) and
-// the cell holds that file's path within the zip, so a grader can find it from the sheet.
+// A file-upload answer isn't text — its raw value is a data: URI (see grading.js). exceljs can
+// embed real images, but a general file (pdf, video, arbitrary upload) still can't live in a
+// cell — so the actual bytes are pulled out into `fileEntries` (to be zipped up alongside the
+// workbook) and the cell holds that file's path within the zip, so a grader can find it from
+// the sheet.
 function buildAnswersGrid(sheetFolder, respondents, fileEntries) {
-  if (respondents.length === 0) return [["No respondents"]];
+  if (respondents.length === 0) return { grid: [["No respondents"]], metaRowCount: 0 };
 
   const questions = respondents[0].breakdown.map((b) => ({
     title: b.title || "Untitled question",
@@ -60,12 +133,18 @@ function buildAnswersGrid(sheetFolder, respondents, fileEntries) {
     return Array.isArray(value) ? value.join(", ") : value;
   };
 
-  const header = ["Question", "Correct Answer", "Points", ...respondents.map((r) => r.respondentName || "Anonymous")];
-  const rows = questions.map((q, i) => [
-    q.title,
-    q.correctAnswer,
-    q.points,
-    ...respondents.map((r, ri) => {
+  const header = ["Respondent", ...questions.map((q) => q.title)];
+  const hasGradable = questions.some((q) => q.correctAnswer !== "" || q.points !== "");
+  const metaRows = hasGradable
+    ? [
+        ["Correct Answer", ...questions.map((q) => q.correctAnswer)],
+        ["Points", ...questions.map((q) => q.points)],
+      ]
+    : [];
+
+  const rows = respondents.map((r, ri) => [
+    r.respondentName || "Anonymous",
+    ...questions.map((q, i) => {
       const b = r.breakdown[i];
       if (b?.fileUrl) {
         const ext = fileExtensionFromDataUri(b.fileUrl);
@@ -77,7 +156,18 @@ function buildAnswersGrid(sheetFolder, respondents, fileEntries) {
     }),
   ]);
 
-  return [header, ...rows];
+  return { grid: [header, ...metaRows, ...rows], metaRowCount: metaRows.length };
+}
+
+export function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 // Reuses the same client-side XLSX generation approach as the rest of the app (no server-side
@@ -87,34 +177,66 @@ function buildAnswersGrid(sheetFolder, respondents, fileEntries) {
 // together with those files (under files/<session>/...) instead of downloading a bare .xlsx,
 // since the file itself — not just a "File attached" label — needs to actually be handed over.
 export async function exportSessionsToWorkbook(sessionExports) {
-  const wb = XLSX.utils.book_new();
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Self Host Form";
+  wb.created = new Date();
+
   const usedSheetNames = new Set();
   const fileEntries = [];
 
+  const summaryHeader = [
+    "Session",
+    "Form",
+    "Respondent",
+    "Status",
+    "Started At",
+    "Submitted At",
+    "Score",
+    "Total Points",
+    "Percentage",
+  ];
   const summaryRows = [];
 
   sessionExports.forEach(({ session, formTitle, respondents }) => {
     respondents.forEach((r) => {
-      summaryRows.push({
-        Session: session.name || "Untitled session",
-        Form: formTitle,
-        Respondent: r.respondentName,
-        Status: r.status === "submitted" ? "Submitted" : "In Progress",
-        "Started At": r.startedAt ? new Date(r.startedAt).toLocaleString() : "",
-        "Submitted At": r.submittedAt ? new Date(r.submittedAt).toLocaleString() : "",
-        Score: r.score ?? "",
-        "Total Points": r.maxScore ?? "",
-        "Percentage": r.percentage != null ? `${r.percentage}%` : "",
-      });
+      summaryRows.push([
+        session.name || "Untitled session",
+        formTitle,
+        r.respondentName,
+        r.status === "submitted" ? "Submitted" : "In Progress",
+        r.startedAt ? new Date(r.startedAt).toLocaleString() : "",
+        r.submittedAt ? new Date(r.submittedAt).toLocaleString() : "",
+        r.score ?? "",
+        r.maxScore ?? "",
+        r.percentage != null ? `${r.percentage}%` : "",
+      ]);
     });
   });
 
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), uniqueSheetName("Results", usedSheetNames));
+  const infoLines = [
+    sessionExports.length === 1 ? sessionExports[0].session.name || "Session export" : "Bulk session export",
+    `Sessions: ${sessionExports.length}`,
+    `Respondents: ${summaryRows.length}`,
+    `Exported: ${new Date().toLocaleString()}`,
+  ];
+
+  addGridSheet(wb, uniqueSheetName("Results", usedSheetNames), [summaryHeader, ...summaryRows], { infoLines });
 
   sessionExports.forEach(({ session, formTitle, respondents }) => {
     const sheetName = uniqueSheetName(session.name || formTitle || "Answers", usedSheetNames);
-    const grid = buildAnswersGrid(slug(sheetName), respondents, fileEntries);
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(grid), sheetName);
+    const { grid, metaRowCount } = buildAnswersGrid(slug(sheetName), respondents, fileEntries);
+    const sheet = addGridSheet(wb, sheetName, grid, {
+      infoLines: [session.name || "Untitled session", formTitle || ""],
+      skipBandRows: metaRowCount,
+    });
+    // Bold the "Correct Answer"/"Points" rows so they read as a fixed answer key, not just two
+    // more respondent rows (banding already skips them via skipBandRows above).
+    if (metaRowCount > 0) {
+      const headerRowIndex = sheet.rowCount - grid.length + 1;
+      for (let r = headerRowIndex + 1; r <= headerRowIndex + metaRowCount; r++) {
+        sheet.getRow(r).font = { bold: true, color: { argb: "FF37352F" } };
+      }
+    }
   });
 
   const nameHint = sessionExports.length === 1 ? sessionExports[0].session.name : "sessions";
@@ -122,22 +244,20 @@ export async function exportSessionsToWorkbook(sessionExports) {
     .toISOString()
     .slice(0, 10)}`;
 
+  const xlsxBuffer = await wb.xlsx.writeBuffer();
+
   if (fileEntries.length === 0) {
-    XLSX.writeFile(wb, `${baseFilename}.xlsx`);
+    triggerDownload(
+      new Blob([xlsxBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      `${baseFilename}.xlsx`
+    );
     return;
   }
 
   const zip = new JSZip();
-  zip.file(`${baseFilename}.xlsx`, XLSX.write(wb, { type: "array", bookType: "xlsx" }));
+  zip.file(`${baseFilename}.xlsx`, xlsxBuffer);
   fileEntries.forEach(({ path, bytes }) => zip.file(path, bytes));
 
   const blob = await zip.generateAsync({ type: "blob" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${baseFilename}.zip`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  triggerDownload(blob, `${baseFilename}.zip`);
 }

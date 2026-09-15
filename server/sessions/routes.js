@@ -15,12 +15,32 @@ formSessionsRouter.get("/", (req, res) => {
   res.json(sessionsRepo.listSessionsForForm(req.params.formId));
 });
 
+// Mounted at /api/forms/:formId/responses — every submitted response to this form, across every
+// session that used it, each run through the same buildFullBreakdown per-question detail the
+// single-response endpoint below already uses. Powers the "All Responses" tab.
+export const formResponsesRouter = Router({ mergeParams: true });
+
+formResponsesRouter.get("/", (req, res) => {
+  const form = formsRepo.getForm(req.params.formId);
+  if (!form) return res.status(404).json({ error: "Form not found" });
+
+  const responses = responsesRepo.listSubmittedResponsesForForm(req.params.formId);
+  res.json(
+    responses.map((r) => ({ ...r, breakdown: buildFullBreakdown(form.questions, r.answers) }))
+  );
+});
+
 // Mounted at /api/sessions
 export const sessionsRouter = Router();
 
 function withFormTitle(session) {
   const form = formsRepo.getForm(session.formId);
-  return { ...session, formTitle: form?.title || "Untitled form", subjectId: form?.subjectId ?? null };
+  return {
+    ...session,
+    formTitle: form?.title || "Untitled form",
+    subjectId: form?.subjectId ?? null,
+    formIsCloudLinked: form?.remoteFormId != null,
+  };
 }
 
 sessionsRouter.get("/", (req, res) => {

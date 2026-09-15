@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, shell } from "electron";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,11 @@ let splashWindow;
 
 const PORT = 5174;
 const APP_ICON = path.join(__dirname, "..", "build", "icon.ico");
+
+// The cloud server's URL is not a secret (unlike its Google OAuth client secret, which never
+// leaves that service) — it's fine to bake a default in here for a built release. CLOUD_SERVER_URL
+// in the environment still overrides it, which is how local development points at a dev instance.
+const DEFAULT_CLOUD_SERVER_URL = "https://local-host-form-final.onrender.com";
 
 function startServer() {
   const serverPath = path.join(
@@ -27,6 +32,7 @@ function startServer() {
       ELECTRON_RUN_AS_NODE: "1",
       PORT: String(PORT),
       DATA_DIR: path.join(app.getPath("userData"), "data"),
+      CLOUD_SERVER_URL: process.env.CLOUD_SERVER_URL || DEFAULT_CLOUD_SERVER_URL,
     },
     stdio: "pipe",
   });
@@ -100,6 +106,44 @@ function createWindow() {
       splashWindow = null;
     }
     mainWindow.show();
+  });
+
+  // Google's OAuth consent screen refuses to load inside an embedded/webview browser like this
+  // window ("disallowed_useragent"), so any navigation leaving our own local server — the
+  // cloud sign-in flow, in practice — is handed off to the user's real OS browser instead of
+  // opening (or navigating) inside the app.
+  //
+  // data:/blob: URLs are never "external" in that sense — they're always this app's own
+  // generated content (a downloaded file, an inline image) rather than a real address, and
+  // shell.openExternal() can't open them anyway (Windows' ShellExecute rejects a giant data:
+  // URI with "the system cannot find the file specified"). Let Electron's own download
+  // handling deal with those instead of routing them to the OS.
+  const isOwnOrigin = (url) => {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "data:" || parsed.protocol === "blob:") return true;
+      return parsed.origin === `http://localhost:${PORT}`;
+    } catch {
+      return false;
+    }
+  };
+
+  const openExternal = (url) => {
+    shell.openExternal(url).catch((err) => {
+      console.error("Failed to open external URL:", url, err);
+    });
+  };
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isOwnOrigin(url)) return { action: "allow" };
+    openExternal(url);
+    return { action: "deny" };
+  });
+
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (isOwnOrigin(url)) return;
+    event.preventDefault();
+    openExternal(url);
   });
 
   mainWindow.loadURL(`http://localhost:${PORT}`);

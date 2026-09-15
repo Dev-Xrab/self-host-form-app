@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { sessionsApi } from "../../features/sessions/services/sessionsApi";
+import { useSync } from "../../features/cloud/hooks/useSync";
 import RespondentDetailModal from "../../features/sessions/components/RespondentDetailModal";
-import ConfirmModal from "./ConfirmModal";
+import ConfirmDialog from "../../components/Dialog/ConfirmDialog";
+import Dialog from "../../components/Dialog/Dialog";
 import { exportSessionsToWorkbook } from "../../features/sessions/utils/export";
 import {
   formatClock,
@@ -15,6 +17,7 @@ import { Icons } from "./icons";
 import { Monogram, initial } from "./Monogram";
 import QrCodeThumb from "./QrCodeThumb";
 import { useServerOrigin } from "./useServerOrigin";
+import Toggle from "../../components/ui/Toggle";
 import "../../features/sessions/components/session.css";
 
 const SESSION_CONFIRM_CONFIG = {
@@ -70,6 +73,9 @@ export default function SessionDetailPage() {
   const [editError, setEditError] = useState(null);
   const [confirmAction, setConfirmAction] = useState(null); // null | "end" | "reopen" | "delete"
   const [togglingEditable, setTogglingEditable] = useState(false);
+  const [showSyncPrompt, setShowSyncPrompt] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const { status: syncStatus, sync } = useSync();
 
   const load = useCallback(() => {
     Promise.all([sessionsApi.get(sessionId), sessionsApi.respondents(sessionId)])
@@ -120,6 +126,9 @@ export default function SessionDetailPage() {
   const isActive = session.status === "active";
   const isEnded = session.status === "ended";
 
+  const pendingBacklog = (syncStatus?.pendingCount || 0) + (syncStatus?.failedCount || 0);
+  const canOfferSync = session.formIsCloudLinked && syncStatus?.connected && syncStatus?.reachable && pendingBacklog > 0;
+
   const runAction = async (fn) => {
     setWorking(true);
     setActionError(null);
@@ -131,6 +140,28 @@ export default function SessionDetailPage() {
     } finally {
       setWorking(false);
     }
+  };
+
+  const handleStartClick = () => {
+    if (canOfferSync) setShowSyncPrompt(true);
+    else runAction(() => sessionsApi.start(session.id));
+  };
+
+  const handleSyncAndStart = async () => {
+    setSyncing(true);
+    try {
+      await sync();
+    } catch {
+      // Surfaced separately via the sidebar SyncStatus/SyncIssuesPanel — doesn't block starting.
+    }
+    setSyncing(false);
+    setShowSyncPrompt(false);
+    runAction(() => sessionsApi.start(session.id));
+  };
+
+  const handleStartWithoutSync = () => {
+    setShowSyncPrompt(false);
+    runAction(() => sessionsApi.start(session.id));
   };
 
   const handleExport = async () => {
@@ -242,7 +273,7 @@ export default function SessionDetailPage() {
                 type="button"
                 className="dash-primary-btn"
                 disabled={working}
-                onClick={() => runAction(() => sessionsApi.start(session.id))}
+                onClick={handleStartClick}
               >
                 <Icons.play />
                 Start Session
@@ -325,14 +356,7 @@ export default function SessionDetailPage() {
         )}
 
         <div className="dash-toggle-row">
-          <button
-            type="button"
-            className={`dash-toggle ${session.responsesEditable ? "is-on" : ""}`}
-            role="switch"
-            aria-checked={session.responsesEditable}
-            disabled={togglingEditable}
-            onClick={handleToggleEditable}
-          />
+          <Toggle checked={session.responsesEditable} disabled={togglingEditable} onChange={handleToggleEditable} />
           <span>
             Allow respondents to edit their answer after submitting
             {session.responsesEditable && !isActive && " (only takes effect while the session is active)"}
@@ -478,11 +502,31 @@ export default function SessionDetailPage() {
       )}
 
       {confirmAction && (
-        <ConfirmModal
+        <ConfirmDialog
           {...SESSION_CONFIRM_CONFIG[confirmAction]}
           onCancel={() => setConfirmAction(null)}
           onConfirm={handleConfirmSessionAction}
         />
+      )}
+
+      {showSyncPrompt && (
+        <Dialog title="Sync before starting?" onClose={() => setShowSyncPrompt(false)}>
+          <div className="dash-form">
+            <p className="dash-form-label">
+              This form is connected to your cloud account, and there {pendingBacklog === 1 ? "is" : "are"}{" "}
+              {pendingBacklog} response{pendingBacklog === 1 ? "" : "s"} waiting to sync. Sync now, or start
+              the session and sync later from the sidebar.
+            </p>
+            <div className="dash-modal-footer">
+              <button type="button" className="dash-ghost-btn" onClick={handleStartWithoutSync} disabled={syncing}>
+                Start without syncing
+              </button>
+              <button type="button" className="dash-primary-btn" onClick={handleSyncAndStart} disabled={syncing}>
+                {syncing ? "Syncing…" : "Sync & Start"}
+              </button>
+            </div>
+          </div>
+        </Dialog>
       )}
     </>
   );

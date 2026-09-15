@@ -1,0 +1,94 @@
+import { randomUUID } from "node:crypto";
+import { db } from "../db/index.js";
+
+const now = () => new Date().toISOString();
+
+const getSettingStmt = db.prepare("SELECT value FROM app_settings WHERE key = ?");
+const setSettingStmt = db.prepare(
+  "INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+);
+
+// Generated once per install and persisted forever — deliberately not the hostname, so a
+// reinstalled OS or renamed machine doesn't fracture sync identity on the cloud server.
+export function ensureDeviceId() {
+  const existing = getSettingStmt.get("device_id");
+  if (existing) return existing.value;
+  const id = randomUUID();
+  setSettingStmt.run("device_id", id);
+  return id;
+}
+
+export function getDeviceId() {
+  return getSettingStmt.get("device_id")?.value || ensureDeviceId();
+}
+
+function rowToAccount(row) {
+  if (!row) return null;
+  return {
+    userId: row.user_id,
+    email: row.email,
+    name: row.name,
+    avatarUrl: row.avatar_url,
+    accessToken: row.access_token,
+    accessTokenExpiresAt: row.access_token_expires_at,
+    refreshToken: row.refresh_token,
+  };
+}
+
+const selectAccountStmt = db.prepare("SELECT * FROM cloud_account WHERE id = 1");
+
+// Only ever called from within server/cloud — no route in this app returns the raw tokens to
+// the renderer (see routes.js authStatus, which strips them before responding).
+export function getCloudAccount() {
+  return rowToAccount(selectAccountStmt.get());
+}
+
+const upsertAccountStmt = db.prepare(`
+  INSERT INTO cloud_account (id, user_id, email, name, avatar_url, access_token, access_token_expires_at, refresh_token, created_at, updated_at)
+  VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(id) DO UPDATE SET
+    user_id = excluded.user_id,
+    email = excluded.email,
+    name = excluded.name,
+    avatar_url = excluded.avatar_url,
+    access_token = excluded.access_token,
+    access_token_expires_at = excluded.access_token_expires_at,
+    refresh_token = excluded.refresh_token,
+    updated_at = excluded.updated_at
+`);
+
+export function saveCloudAccount({ userId, email, name, avatarUrl, accessToken, accessTokenExpiresAt, refreshToken }) {
+  const timestamp = now();
+  upsertAccountStmt.run(userId, email, name || "", avatarUrl || null, accessToken, accessTokenExpiresAt, refreshToken, timestamp, timestamp);
+}
+
+const updateTokensStmt = db.prepare(`
+  UPDATE cloud_account SET access_token = ?, access_token_expires_at = ?, refresh_token = ?, updated_at = ? WHERE id = 1
+`);
+
+export function updateCloudTokens({ accessToken, accessTokenExpiresAt, refreshToken }) {
+  updateTokensStmt.run(accessToken, accessTokenExpiresAt, refreshToken, now());
+}
+
+export function clearCloudAccount() {
+  db.prepare("DELETE FROM cloud_account WHERE id = 1").run();
+}
+
+// The last server_seq this device has fully applied — see server/cloud/sync.js. Stored in
+// app_settings (same table the host-password/recovery settings already use) rather than a
+// dedicated table, since it's a single scalar with no other fields.
+export function getSyncCursor() {
+  return Number(getSettingStmt.get("last_sync_cursor")?.value || 0);
+}
+
+export function setSyncCursor(cursor) {
+  setSettingStmt.run("last_sync_cursor", String(cursor));
+}
+
+export function getLastSyncedAt() {
+  return getSettingStmt.get("last_synced_at")?.value || null;
+}
+
+export function setLastSyncedAt(timestamp) {
+  setSettingStmt.run("last_synced_at", timestamp);
+}

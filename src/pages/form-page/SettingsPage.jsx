@@ -2,8 +2,11 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useFormStore, { useFormActions } from "../../../store/useFormStore";
 import { useSubjects } from "../../features/subjects/hooks/useSubjects";
+import SubjectSelect from "../../features/subjects/components/SubjectSelect";
 import { formsApi } from "../../features/forms/services/formsApi";
 import { downloadFormAsJson } from "../../features/forms/utils/exportForm";
+import Toggle from "../../components/ui/Toggle";
+import ConfirmDialog from "../../components/Dialog/ConfirmDialog";
 import "./settings-page.css";
 
 function ToggleRow({ label, description, checked, onChange, children }) {
@@ -15,10 +18,7 @@ function ToggleRow({ label, description, checked, onChange, children }) {
       </div>
       <div className="settings-row-control">
         {children}
-        <label className="settings-toggle">
-          <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-          <span className="settings-toggle-track" />
-        </label>
+        <Toggle checked={checked} onChange={onChange} />
       </div>
     </div>
   );
@@ -32,10 +32,9 @@ export default function SettingsPage() {
   const formTitle = useFormStore((s) => s.formTitle);
   const { updateFormSettings, setSubjectId } = useFormActions();
   const { subjects } = useSubjects();
+  const defaultSubjectId = subjects.find((s) => s.isDefault)?.id || "";
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
 
@@ -53,16 +52,8 @@ export default function SettingsPage() {
   };
 
   const handleDelete = async () => {
-    if (deleting) return;
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await formsApi.remove(formId);
-      navigate("/dashboard/forms");
-    } catch (err) {
-      setDeleteError(err.message);
-      setDeleting(false);
-    }
+    await formsApi.remove(formId);
+    navigate("/dashboard/forms");
   };
 
   return (
@@ -82,18 +73,12 @@ export default function SettingsPage() {
               <span className="settings-row-desc">Group this form under a subject on the dashboard.</span>
             </div>
             <div className="settings-row-control">
-              <select
+              <SubjectSelect
                 className="settings-subject-select"
-                value={subjectId || ""}
-                onChange={(e) => setSubjectId(e.target.value || null)}
-              >
-                <option value="">No subject</option>
-                {subjects.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+                subjects={subjects}
+                value={subjectId}
+                onChange={(e) => setSubjectId(e.target.value || defaultSubjectId || null)}
+              />
             </div>
           </div>
         </div>
@@ -183,21 +168,13 @@ export default function SettingsPage() {
       </div>
 
       {showDeleteConfirm && (
-        <div className="settings-confirm-overlay" onClick={() => !deleting && setShowDeleteConfirm(false)}>
-          <div className="settings-confirm-dialog" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete "{formTitle || "Untitled form"}"?</h2>
-            <p>This permanently deletes the form, its questions, and every session and response under it.</p>
-            {deleteError && <p className="settings-confirm-error">{deleteError}</p>}
-            <div className="settings-confirm-actions">
-              <button type="button" className="settings-ghost-btn" onClick={() => setShowDeleteConfirm(false)}>
-                Cancel
-              </button>
-              <button type="button" className="settings-danger-btn" onClick={handleDelete} disabled={deleting}>
-                {deleting ? "Deleting…" : "Delete Form"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Delete Form"
+          message={`Delete "${formTitle || "Untitled form"}"? This permanently deletes the form, its questions, and every session and response under it.`}
+          confirmLabel="Delete Form"
+          onCancel={() => setShowDeleteConfirm(false)}
+          onConfirm={handleDelete}
+        />
       )}
     </div>
   );

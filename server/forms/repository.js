@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
+import { getDefaultSubject } from "../subjects/repository.js";
+
+// Every form gets *some* subject — the permanent "General" one when none is given — rather than
+// a parallel "no subject" state. Falls back to null only in the (should-never-happen) case the
+// default subject hasn't been seeded yet, so this never throws during startup ordering.
+function resolveSubjectId(subjectId) {
+  if (subjectId) return subjectId;
+  return getDefaultSubject()?.id ?? null;
+}
 
 // Timer/session-code settings moved to the session itself (a session now owns its own
 // time limit) — a form only carries grading-disclosure and retake policy.
@@ -23,10 +32,12 @@ function rowToQuestion(row) {
     required: !!row.required,
     options: JSON.parse(row.options),
     scale: JSON.parse(row.scale),
+    rows: JSON.parse(row.rows || "[]"),
     imageUrl: row.image_url,
     correctAnswerIndex: JSON.parse(row.correct_answer_index),
     correctAnswers: JSON.parse(row.correct_answers),
     points: row.points,
+    removedAt: row.removed_at || null,
   };
 }
 
@@ -39,10 +50,21 @@ function rowToFormMeta(row) {
     subjectId: row.subject_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    remoteFormId: row.remote_form_id,
+    remoteVersion: row.remote_version,
+    ownerUserId: row.owner_user_id,
+    googleFormId: row.google_form_id,
   };
 }
 
 const selectFormStmt = db.prepare("SELECT * FROM forms WHERE id = ?");
+const selectFormByRemoteIdStmt = db.prepare("SELECT id FROM forms WHERE remote_form_id = ?");
+
+// Used while applying downloaded sync changes (see server/cloud/sync.js) to map a response's
+// cloud-side formId back to this device's local form row.
+export function getFormIdByRemoteId(remoteFormId) {
+  return selectFormByRemoteIdStmt.get(remoteFormId)?.id || null;
+}
 const selectQuestionsStmt = db.prepare(
   "SELECT * FROM questions WHERE form_id = ? ORDER BY order_index ASC"
 );
@@ -50,6 +72,16 @@ const selectAllFormsStmt = db.prepare("SELECT * FROM forms ORDER BY updated_at D
 const countQuestionsStmt = db.prepare(
   "SELECT form_id, COUNT(*) as count FROM questions WHERE type != 'section' GROUP BY form_id"
 );
+
+// One-time cleanup for forms created before every entry point resolved a missing subjectId to
+// General (see resolveSubjectId above) — called once at boot, after ensureDefaultSubject() has
+// guaranteed a default subject exists (server/index.js). A no-op once every such form has been
+// backfilled.
+export function backfillFormsWithoutSubject() {
+  const general = getDefaultSubject();
+  if (!general) return;
+  db.prepare("UPDATE forms SET subject_id = ? WHERE subject_id IS NULL").run(general.id);
+}
 
 export function listForms() {
   const forms = selectAllFormsStmt.all();
@@ -75,7 +107,7 @@ export function createForm({ title = "", description = "", subjectId = null } = 
   db.prepare(
     `INSERT INTO forms (id, title, description, status, settings, subject_id, created_at, updated_at)
      VALUES (?, ?, ?, 'draft', ?, ?, ?, ?)`
-  ).run(id, title, description, JSON.stringify(DEFAULT_SETTINGS), subjectId, timestamp, timestamp);
+  ).run(id, title, description, JSON.stringify(DEFAULT_SETTINGS), resolveSubjectId(subjectId), timestamp, timestamp);
   return getForm(id);
 }
 
@@ -83,8 +115,9 @@ const deleteQuestionsStmt = db.prepare("DELETE FROM questions WHERE form_id = ?"
 const insertQuestionStmt = db.prepare(`
   INSERT INTO questions (
     id, form_id, order_index, type, title, description, show_description, show_image,
-    required, options, scale, image_url, correct_answer_index, correct_answers, points
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    required, options, scale, rows, image_url, correct_answer_index, correct_answers, points,
+    removed_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 const updateFormMetaStmt = db.prepare(`
   UPDATE forms SET title = ?, description = ?, settings = ?, subject_id = ?, updated_at = ? WHERE id = ?
@@ -96,7 +129,7 @@ export function updateForm(id, { title, description, settings, questions, subjec
 
   const nextTitle = title ?? existing.title;
   const nextDescription = description ?? existing.description;
-  const nextSubjectId = subjectId !== undefined ? subjectId : existing.subject_id;
+  const nextSubjectId = subjectId !== undefined ? resolveSubjectId(subjectId) : existing.subject_id;
   const nextSettings = {
     ...DEFAULT_SETTINGS,
     ...JSON.parse(existing.settings),
@@ -116,8 +149,18 @@ export function updateForm(id, { title, description, settings, questions, subjec
     );
 
     if (Array.isArray(questions)) {
+      // A routine builder save only ever sends the current active question set — it doesn't know
+      // about questions a Google structural sync has already marked removed (see
+      // server/forms/questionDiff.js). Re-append any such row that isn't part of this update so
+      // an ordinary save can never silently drop preserved history.
+      const incomingIds = new Set(questions.map((q) => q.id));
+      const preservedLegacy = selectQuestionsStmt
+        .all(id)
+        .map(rowToQuestion)
+        .filter((q) => q.removedAt && !incomingIds.has(q.id));
+
       deleteQuestionsStmt.run(id);
-      questions.forEach((q, index) => {
+      [...questions, ...preservedLegacy].forEach((q, index) => {
         insertQuestionStmt.run(
           q.id || randomUUID(),
           id,
@@ -130,10 +173,12 @@ export function updateForm(id, { title, description, settings, questions, subjec
           q.required ? 1 : 0,
           JSON.stringify(q.options || []),
           JSON.stringify(q.scale || {}),
+          JSON.stringify(q.rows || []),
           q.imageUrl || null,
           JSON.stringify(q.correctAnswerIndex || []),
           JSON.stringify(q.correctAnswers || []),
-          Number.isFinite(q.points) && q.points >= 0 ? q.points : 1
+          Number.isFinite(q.points) && q.points >= 0 ? q.points : 1,
+          q.removedAt || null
         );
       });
     }
@@ -146,12 +191,33 @@ export function updateForm(id, { title, description, settings, questions, subjec
   return getForm(id);
 }
 
-// Recreates a form from a previously-exported definition as a brand new form — always
-// fresh form/question IDs (never reuse the exported ones) so importing the same file twice,
-// or on a different server, can never collide with an existing row. Question images are
-// already inline base64 data: URIs on the question object (see ImageBlock.jsx), so they
-// round-trip for free with no separate asset handling.
-export function importForm({ title = "", description = "", settings, questions, subjectId = null } = {}) {
+// Recreates a form from a previously-exported definition (a JSON file, or a form fetched from
+// the cloud server — see server/cloud/routes.js) as a brand new form — always a fresh form id
+// (never reuse the exported one) so importing the same source twice can never collide with an
+// existing row. Question images are already inline base64 data: URIs on the question object
+// (see ImageBlock.jsx), so they round-trip for free with no separate asset handling.
+// remoteFormId/remoteVersion/ownerUserId are only set for cloud imports — a plain file import
+// leaves them null, matching a locally-authored form.
+//
+// preserveQuestionIds matters ONLY for cloud imports: a response synced down from another
+// device has its answers keyed by THAT device's question ids (see server/cloud/sync.js and
+// buildPayload in the same file) — those ids are shared, canonical identifiers for a given
+// form version once it's on the cloud server, not a per-device implementation detail. Minting
+// fresh question ids here (the plain file-import behavior, kept as the default) would silently
+// orphan every synced-down response's answers on any device that had to import the form itself
+// rather than being the one that published it.
+export function importForm({
+  title = "",
+  description = "",
+  settings,
+  questions,
+  subjectId = null,
+  remoteFormId = null,
+  remoteVersion = null,
+  ownerUserId = null,
+  preserveQuestionIds = false,
+  googleFormId = null,
+} = {}) {
   const id = randomUUID();
   const timestamp = now();
   const nextSettings = { ...DEFAULT_SETTINGS, ...(settings || {}) };
@@ -159,13 +225,13 @@ export function importForm({ title = "", description = "", settings, questions, 
   db.exec("BEGIN");
   try {
     db.prepare(
-      `INSERT INTO forms (id, title, description, status, settings, subject_id, created_at, updated_at)
-       VALUES (?, ?, ?, 'draft', ?, ?, ?, ?)`
-    ).run(id, title, description, JSON.stringify(nextSettings), subjectId, timestamp, timestamp);
+      `INSERT INTO forms (id, title, description, status, settings, subject_id, created_at, updated_at, remote_form_id, remote_version, owner_user_id, google_form_id)
+       VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, title, description, JSON.stringify(nextSettings), resolveSubjectId(subjectId), timestamp, timestamp, remoteFormId, remoteVersion, ownerUserId, googleFormId);
 
     (questions || []).forEach((q, index) => {
       insertQuestionStmt.run(
-        randomUUID(),
+        preserveQuestionIds && q.id ? q.id : randomUUID(),
         id,
         index,
         q.type,
@@ -176,10 +242,12 @@ export function importForm({ title = "", description = "", settings, questions, 
         q.required ? 1 : 0,
         JSON.stringify(q.options || []),
         JSON.stringify(q.scale || {}),
+        JSON.stringify(q.rows || []),
         q.imageUrl || null,
         JSON.stringify(q.correctAnswerIndex || []),
         JSON.stringify(q.correctAnswers || []),
-        Number.isFinite(q.points) && q.points >= 0 ? q.points : 1
+        Number.isFinite(q.points) && q.points >= 0 ? q.points : 1,
+        q.removedAt || null
       );
     });
     db.exec("COMMIT");
@@ -188,6 +256,30 @@ export function importForm({ title = "", description = "", settings, questions, 
     throw err;
   }
 
+  return getForm(id);
+}
+
+const setRemoteInfoStmt = db.prepare(
+  "UPDATE forms SET remote_form_id = ?, remote_version = ?, owner_user_id = ?, updated_at = ? WHERE id = ?"
+);
+
+// Stamps a local form with where it now lives on the cloud server, after a publish (see
+// server/cloud/routes.js POST /forms/:id/publish). Never touches title/description/questions —
+// those are the source of truth locally; this only records the remote pointer.
+export function setRemoteInfo(id, { remoteFormId, remoteVersion, ownerUserId }) {
+  setRemoteInfoStmt.run(remoteFormId, remoteVersion, ownerUserId, now(), id);
+  return getForm(id);
+}
+
+const setGoogleFormIdStmt = db.prepare(
+  "UPDATE forms SET google_form_id = ?, updated_at = ? WHERE id = ?"
+);
+
+// Records which real Google Form this local form was imported from, so a later
+// "Update from Google" (see server/cloud/routes.js POST /google-forms/:id/refresh) can find
+// its way back to it. Set once at import time; never touched afterward.
+export function setGoogleFormId(id, googleFormId) {
+  setGoogleFormIdStmt.run(googleFormId, now(), id);
   return getForm(id);
 }
 

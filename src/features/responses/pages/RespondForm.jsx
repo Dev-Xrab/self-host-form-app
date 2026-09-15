@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import AnswerQuestion from "../components/AnswerQuestion";
+import QuestionPager from "../components/QuestionPager";
 import { responsesApi } from "../services/responsesApi";
 import { getDeviceId } from "../utils/deviceId";
 import { downloadAnswersAsText } from "../utils/downloadAnswers";
+import { groupIntoPages } from "../utils/groupIntoPages";
+import { enterFullscreen, exitFullscreen } from "../utils/fullscreen";
 import { formatClock, secondsRemaining } from "../../sessions/utils/time";
+import { isMatrixQuestion, getMatrixMissingRows, matrixRequiredMessage } from "../../../lib/matrixQuestions";
 import "./respond-form.css";
 
 const NAME_STORAGE_KEY = "stonearch_respondent_name";
@@ -15,24 +18,35 @@ const isImageDataUri = (dataUri) => /^data:image\//.test(dataUri || "");
 const isEmpty = (question, value) => {
   if (value === undefined || value === null) return true;
   if (question.type === "checkboxes") return !Array.isArray(value) || value.length === 0;
+  if (isMatrixQuestion(question.type)) return getMatrixMissingRows(question, value).length > 0;
   return String(value).trim() === "";
 };
 
-// In-progress answers are mirrored to localStorage under the response's own id (stable
-// across reloads for the same device+session, see the resume-by-deviceId join above) so a
-// refresh mid-quiz restores exactly where the respondent left off instead of starting blank.
+const requiredMessage = (question) =>
+  isMatrixQuestion(question.type) ? matrixRequiredMessage(question) : "This question is required.";
+
+// In-progress answers (and which page the respondent was on) are mirrored to localStorage
+// under the response's own id (stable across reloads for the same device+session, see the
+// resume-by-deviceId join above) so a refresh mid-quiz restores exactly where the
+// respondent left off instead of starting blank. Older stored entries (from before paging
+// existed) are just the flat answers object — duck-typed below so those still resume.
 const loadStoredAnswers = (responseId) => {
   try {
     const raw = localStorage.getItem(ANSWERS_STORAGE_PREFIX + responseId);
-    return raw ? JSON.parse(raw) : {};
+    if (!raw) return { answers: {}, pageIndex: 0 };
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && "answers" in parsed) {
+      return { answers: parsed.answers || {}, pageIndex: parsed.pageIndex || 0 };
+    }
+    return { answers: parsed || {}, pageIndex: 0 };
   } catch {
-    return {};
+    return { answers: {}, pageIndex: 0 };
   }
 };
 
-const saveStoredAnswers = (responseId, answers) => {
+const saveStoredAnswers = (responseId, answers, pageIndex) => {
   try {
-    localStorage.setItem(ANSWERS_STORAGE_PREFIX + responseId, JSON.stringify(answers));
+    localStorage.setItem(ANSWERS_STORAGE_PREFIX + responseId, JSON.stringify({ answers, pageIndex }));
   } catch {
     // best-effort convenience only
   }
@@ -75,6 +89,8 @@ export default function RespondForm() {
 
   const [answers, setAnswers] = useState({});
   const [fieldErrors, setFieldErrors] = useState({});
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [scrollToId, setScrollToId] = useState(null);
   const [submitStatus, setSubmitStatus] = useState("idle"); // idle | submitting | error
   const [submitError, setSubmitError] = useState(null);
   const [result, setResult] = useState(null);
@@ -132,6 +148,7 @@ export default function RespondForm() {
     () => Object.fromEntries(answerableQuestions.map((q) => [q.id, q])),
     [answerableQuestions]
   );
+  const pages = useMemo(() => groupIntoPages(form ? form.questions : []), [form]);
 
   const applyJoinPayload = (payload) => {
     setResponseId(payload.responseId);
@@ -147,13 +164,18 @@ export default function RespondForm() {
       // previously-submitted answer, possibly from a different device than the one that
       // originally submitted it.
       const stored = loadStoredAnswers(payload.responseId);
-      setAnswers(Object.keys(stored).length > 0 ? stored : payload.answers || {});
+      const hasStoredAnswers = Object.keys(stored.answers).length > 0;
+      setAnswers(hasStoredAnswers ? stored.answers : payload.answers || {});
+      setCurrentPageIndex(hasStoredAnswers ? stored.pageIndex : 0);
       setPageStatus("answering");
     }
   };
 
   const handleJoin = async (e) => {
     e.preventDefault();
+    // Must be called synchronously inside this click handler — after the `await` below,
+    // the browser no longer considers this a user gesture and silently ignores the request.
+    enterFullscreen();
     setJoining(true);
     setJoinError(null);
     try {
@@ -173,6 +195,7 @@ export default function RespondForm() {
 
   const handleEditCodeSubmit = async (e) => {
     e.preventDefault();
+    enterFullscreen();
     setSubmittingEditCode(true);
     setEditCodeError(null);
     try {
@@ -186,6 +209,7 @@ export default function RespondForm() {
   };
 
   const handleEditFromDone = async () => {
+    enterFullscreen();
     setReopening(true);
     setReopenError(null);
     try {
@@ -203,8 +227,19 @@ export default function RespondForm() {
   // via applyJoinPayload's silent resume instead of losing it.
   useEffect(() => {
     if (pageStatus !== "answering" || !responseId) return;
-    saveStoredAnswers(responseId, answers);
-  }, [pageStatus, responseId, answers]);
+    saveStoredAnswers(responseId, answers, currentPageIndex);
+  }, [pageStatus, responseId, answers, currentPageIndex]);
+
+  // After a validation failure jumps the pager to an earlier page (see handleSubmitClick),
+  // scroll to the offending field once that page has actually rendered.
+  useEffect(() => {
+    if (!scrollToId) return;
+    const id = scrollToId;
+    setScrollToId(null);
+    requestAnimationFrame(() => {
+      document.getElementById(`answer-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [scrollToId, currentPageIndex]);
 
   const submitAnswers = async ({ timedOut = false } = {}) => {
     setSubmitStatus("submitting");
@@ -215,11 +250,14 @@ export default function RespondForm() {
       setResult(res);
       setAutoSubmitted(timedOut);
       setPageStatus("done");
+      exitFullscreen();
     } catch (err) {
       setSubmitStatus("error");
       if (err.status === 400 && err.body?.missingQuestionIds) {
         setFieldErrors(
-          Object.fromEntries(err.body.missingQuestionIds.map((id) => [id, "This question is required."]))
+          Object.fromEntries(
+            err.body.missingQuestionIds.map((id) => [id, requiredMessage(questionsById[id] || {})])
+          )
         );
         setSubmitError("Some required questions are missing an answer.");
       } else {
@@ -268,14 +306,36 @@ export default function RespondForm() {
     setFieldErrors((prev) => (prev[questionId] ? { ...prev, [questionId]: undefined } : prev));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  // "Next" only checks the page the respondent is currently looking at — same batching
+  // Google Forms uses (validate the visible page, don't reach ahead into later ones).
+  const handleNext = () => {
+    const currentQuestions = pages[currentPageIndex]?.questions || [];
+    const missing = currentQuestions.filter((q) => q.required && isEmpty(q, answers[q.id]));
+    if (missing.length > 0) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        ...Object.fromEntries(missing.map((q) => [q.id, requiredMessage(q)])),
+      }));
+      setScrollToId(missing[0].id);
+      return;
+    }
+    setCurrentPageIndex((i) => Math.min(pages.length - 1, i + 1));
+  };
+
+  const handleBack = () => {
+    setCurrentPageIndex((i) => Math.max(0, i - 1));
+  };
+
+  // The authoritative last-line check before submitting: covers a respondent who went back
+  // and cleared an answer on an earlier page after Next had already validated it once. If
+  // anything is still missing, jump to the page that question lives on and point at it.
+  const handleSubmitClick = () => {
     const missing = answerableQuestions.filter((q) => q.required && isEmpty(q, answers[q.id]));
     if (missing.length > 0) {
-      setFieldErrors(Object.fromEntries(missing.map((q) => [q.id, "This question is required."])));
-      document
-        .getElementById(`answer-${missing[0].id}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setFieldErrors(Object.fromEntries(missing.map((q) => [q.id, requiredMessage(q)])));
+      const targetPageIndex = pages.findIndex((p) => p.questions.some((q) => q.id === missing[0].id));
+      if (targetPageIndex !== -1) setCurrentPageIndex(targetPageIndex);
+      setScrollToId(missing[0].id);
       return;
     }
     submitAnswers();
@@ -285,9 +345,22 @@ export default function RespondForm() {
     if (pageStatus === "answering") {
       setShowExitConfirm(true);
     } else {
+      exitFullscreen();
       navigate("/");
     }
   };
+
+  const handleConfirmLeave = () => {
+    exitFullscreen();
+    navigate("/");
+  };
+
+  // Covers every other way this component can stop showing the answering screen: closing
+  // the tab, the browser back button, or the timer/host-ended-session effects above calling
+  // submitAnswers — leaving fullscreen behind would otherwise strand the respondent in it.
+  useEffect(() => {
+    return () => exitFullscreen();
+  }, []);
 
   if (pageStatus === "loading") {
     return <div className="respond-page-message">Loading…</div>;
@@ -443,44 +516,38 @@ export default function RespondForm() {
 
   return (
     <div className="respond-page">
-      <form className="respond-form-column" onSubmit={handleSubmit}>
-        <div className="respond-form-header">
-          <div className="respond-form-header-row">
-            <button type="button" className="respond-exit-link" onClick={handleExit}>
-              ← Leave
-            </button>
-            {secondsLeft !== null && (
-              <span className={`respond-timer ${secondsLeft <= 60 ? "respond-timer-urgent" : ""}`}>
-                {formatClock(secondsLeft)}
-              </span>
-            )}
-          </div>
-          <h1>{form.title || "Untitled form"}</h1>
-          {form.description && <p>{form.description}</p>}
+      <div className="respond-form-column">
+        <div className="respond-toolbar">
+          <button type="button" className="respond-exit-link" onClick={handleExit}>
+            ← Leave
+          </button>
+          {secondsLeft !== null && (
+            <span className={`respond-timer ${secondsLeft <= 60 ? "respond-timer-urgent" : ""}`}>
+              {formatClock(secondsLeft)}
+            </span>
+          )}
         </div>
 
-        {answerableQuestions.map((q, i) => (
-          <div id={`answer-${q.id}`} key={q.id}>
-            <AnswerQuestion
-              question={q}
-              index={i}
-              value={answers[q.id]}
-              onChange={(value) => setAnswer(q.id, value)}
-              error={fieldErrors[q.id]}
-            />
-          </div>
-        ))}
-
-        {answerableQuestions.length === 0 && (
+        {answerableQuestions.length === 0 ? (
           <p className="respond-page-message">This form doesn't have any questions yet.</p>
+        ) : (
+          <QuestionPager
+            pages={pages}
+            currentPageIndex={currentPageIndex}
+            answers={answers}
+            onAnswerChange={setAnswer}
+            fieldErrors={fieldErrors}
+            onBack={handleBack}
+            onNext={handleNext}
+            isLastPage={currentPageIndex === pages.length - 1}
+            onSubmit={handleSubmitClick}
+            submitting={submitStatus === "submitting"}
+            formTitle={form.title}
+            formDescription={form.description}
+            footerNotice={submitError ? <p className="respond-submit-error">{submitError}</p> : null}
+          />
         )}
-
-        {submitError && <p className="respond-submit-error">{submitError}</p>}
-
-        <button type="submit" className="respond-submit-btn" disabled={submitStatus === "submitting"}>
-          {submitStatus === "submitting" ? "Submitting…" : "Submit"}
-        </button>
-      </form>
+      </div>
 
       {showExitConfirm && (
         <div className="respond-exit-overlay">
@@ -491,7 +558,7 @@ export default function RespondForm() {
               <button type="button" className="dash-ghost-btn" onClick={() => setShowExitConfirm(false)}>
                 Stay
               </button>
-              <button type="button" className="respond-exit-confirm" onClick={() => navigate("/")}>
+              <button type="button" className="respond-exit-confirm" onClick={handleConfirmLeave}>
                 Leave
               </button>
             </div>

@@ -1,7 +1,7 @@
 import { useState } from "react";
-import Modal from "./Modal";
+import Dialog from "./Dialog";
 
-export default function ConfirmModal({
+export default function ConfirmDialog({
   title,
   message,
   confirmLabel = "Delete",
@@ -25,7 +25,7 @@ export default function ConfirmModal({
   };
 
   return (
-    <Modal title={title} onClose={onCancel}>
+    <Dialog title={title} onClose={onCancel}>
       <div className="dash-form">
         <p className="dash-form-label">{message}</p>
         {error && <p className="dash-form-error">{error}</p>}
@@ -38,6 +38,6 @@ export default function ConfirmModal({
           </button>
         </div>
       </div>
-    </Modal>
+    </Dialog>
   );
 }

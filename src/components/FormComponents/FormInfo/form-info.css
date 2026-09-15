@@ -17,7 +17,7 @@
   box-sizing: border-box;
 
   font-family: Inter, sans-serif;
-  color: #37352f;
+  color: var(--text);
 
   resize: none;
 }
@@ -30,19 +30,19 @@
 .form-description {
   font-size: 14px;
   line-height: 1.5;
-  color: #787774;
+  color: var(--text-secondary);
 
   overflow: hidden;
 }
 
 .form-title::placeholder,
 .form-description::placeholder {
-  color: #9b9a97;
+  color: var(--text-tertiary);
 }
 
 .form-title:focus,
 .form-description:focus {
-  border-bottom: 1px solid #9b9a97;
+  border-bottom: 1px solid var(--text-tertiary);
 }
 
 .form-title:disabled,
@@ -54,10 +54,10 @@
 }
 
 .form-title:disabled {
-  color: #37352f;
+  color: var(--text);
 }
 
 .form-description:disabled {
-  color: #787774;
+  color: var(--text-secondary);
 }
 

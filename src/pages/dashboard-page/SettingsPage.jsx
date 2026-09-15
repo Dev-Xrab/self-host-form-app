@@ -3,14 +3,15 @@ import { useNavigate } from "react-router-dom";
 import useAuthStore, { useAuthActions } from "../../../store/useAuthStore";
 import { authApi } from "../../features/auth/services/authApi";
 import { settingsApi } from "../../features/settings/services/settingsApi";
+import { useCloudAccount } from "../../features/cloud/hooks/useCloudAccount";
+import Toggle from "../../components/ui/Toggle";
 import { Icons } from "./icons";
-import Modal from "./Modal";
+import Dialog from "../../components/Dialog/Dialog";
 import PageHeader from "./PageHeader";
 
 const CLEAR_DATA_CONFIRM_TEXT = "DELETE";
 
 const TOGGLES = [
-  { id: "requireLogin", label: "Require student login", description: "Students must sign in before joining a quiz.", icon: "lock", defaultChecked: true },
   { id: "autoSave", label: "Auto-save drafts", description: "Save form and quiz edits automatically as you type.", icon: "fileText", defaultChecked: true },
 ];
 
@@ -46,6 +47,34 @@ export default function SettingsPage() {
   const [clearConfirmText, setClearConfirmText] = useState("");
   const [clearing, setClearing] = useState(false);
   const [clearError, setClearError] = useState(null);
+
+  const { account: cloudAccount, connected: cloudConnected, loading: cloudLoading, login: cloudLogin, logout: cloudLogout } = useCloudAccount();
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudError, setCloudError] = useState(null);
+
+  const handleCloudLogin = async () => {
+    setCloudBusy(true);
+    setCloudError(null);
+    try {
+      await cloudLogin();
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleCloudLogout = async () => {
+    setCloudBusy(true);
+    setCloudError(null);
+    try {
+      await cloudLogout();
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setCloudBusy(false);
+    }
+  };
 
   const closeClearConfirm = () => {
     setShowClearConfirm(false);
@@ -177,6 +206,44 @@ export default function SettingsPage() {
         </section>
 
         <section className="dash-section">
+          <h2 className="dash-settings-heading">Cloud account</h2>
+
+          <div className="dash-card dash-settings-card">
+            {cloudLoading ? (
+              <p className="dash-settings-note">Checking cloud connection…</p>
+            ) : cloudConnected ? (
+              <div className="dash-settings-row">
+                <div>
+                  <span className="dash-settings-row-label">{cloudAccount.name || cloudAccount.email}</span>
+                  <span className="dash-settings-row-desc">
+                    Signed in as {cloudAccount.email}. Forms can be imported from and published to this account.
+                  </span>
+                </div>
+                <button type="button" className="dash-ghost-btn" disabled={cloudBusy} onClick={handleCloudLogout}>
+                  <Icons.logout />
+                  {cloudBusy ? "Signing out…" : "Sign out"}
+                </button>
+              </div>
+            ) : (
+              <div className="dash-settings-row">
+                <div>
+                  <span className="dash-settings-row-label">Not connected</span>
+                  <span className="dash-settings-row-desc">
+                    Sign in with Google to import forms from your account and publish forms from this device.
+                  </span>
+                </div>
+                <button type="button" className="dash-primary-btn" disabled={cloudBusy} onClick={handleCloudLogin}>
+                  <Icons.cloud />
+                  {cloudBusy ? "Opening browser…" : "Sign in with Google"}
+                </button>
+              </div>
+            )}
+
+            {cloudError && <p className="dash-form-error">{cloudError}</p>}
+          </div>
+        </section>
+
+        <section className="dash-section">
           <h2 className="dash-settings-heading">Preferences</h2>
 
           <div className="dash-card dash-settings-card">
@@ -194,14 +261,7 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  <label className="dash-toggle">
-                    <input
-                      type="checkbox"
-                      checked={toggles[t.id]}
-                      onChange={() => handleToggle(t.id)}
-                    />
-                    <span className="dash-toggle-track" />
-                  </label>
+                  <Toggle checked={toggles[t.id]} onChange={() => handleToggle(t.id)} />
                 </div>
               );
             })}
@@ -365,7 +425,7 @@ export default function SettingsPage() {
       </div>
 
       {showClearConfirm && (
-        <Modal title="Clear all local data" onClose={closeClearConfirm}>
+        <Dialog title="Clear all local data" onClose={closeClearConfirm}>
           <div className="dash-form">
             <p className="dash-form-label">
               This permanently deletes every quiz, form, question, session, and response on
@@ -402,7 +462,7 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
-        </Modal>
+        </Dialog>
       )}
     </>
   );

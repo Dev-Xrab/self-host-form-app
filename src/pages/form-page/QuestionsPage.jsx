@@ -2,10 +2,20 @@ import FormInfo from "../../components/FormComponents/FormInfo/FormInfo";
 import Question from "../../components/FormComponents/Question/Question";
 import Section from "../../components/FormComponents/Section/Section";
 import WindowContainer from "../../components/Window Container/WindowContainer";
+import PreviewPager from "./PreviewPager";
 import useFormStore from "../../../store/useFormStore";
 
 export default function QuestionsPage() {
   const questions = useFormStore((s) => s.questions);
+  const mode = useFormStore((s) => s.mode);
+
+  if (mode === "view") {
+    return (
+      <div className="page-form-column">
+        <PreviewPager />
+      </div>
+    );
+  }
 
   return (
     <div className="page-form-column">

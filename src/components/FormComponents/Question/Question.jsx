@@ -1,35 +1,11 @@
 import { useState } from "react";
 import useFormStore, { useFormActions } from "../../../../store/useFormStore";
-import { QUESTION_TYPES } from "../questionTypes";
+import { QUESTION_TYPES, getQuestionType } from "../../../lib/questionRegistry";
 import { Icons } from "../icons";
-import ShortAnswer from "../QuestionTypes/ShortAnswer";
-import Paragraph from "../QuestionTypes/Paragraph";
-import MultipleChoice from "../QuestionTypes/MultipleChoice";
-import Checkboxes from "../QuestionTypes/Checkboxes";
-import Dropdown from "../QuestionTypes/Dropdown";
-import LinearScale from "../QuestionTypes/LinearScale";
-import DateField from "../QuestionTypes/DateField";
-import TimeField from "../QuestionTypes/TimeField";
-import FileUpload from "../QuestionTypes/FileUpload";
 import ImageBlock from "../QuestionTypes/ImageBlock";
+import Toggle from "../../ui/Toggle";
 import "../QuestionTypes/question-types.css";
 import "./question.css";
-
-const FIELD_COMPONENTS = {
-  short_answer: ShortAnswer,
-  paragraph: Paragraph,
-  multiple_choice: MultipleChoice,
-  checkboxes: Checkboxes,
-  dropdown: Dropdown,
-  linear_scale: LinearScale,
-  date: DateField,
-  time: TimeField,
-  file_upload: FileUpload,
-};
-
-const TYPE_ICON = Object.fromEntries(QUESTION_TYPES.map((t) => [t.id, t.icon]));
-const TYPE_LABEL = Object.fromEntries(QUESTION_TYPES.map((t) => [t.id, t.label]));
-const GRADABLE_TYPES = new Set(["short_answer", "paragraph", "multiple_choice", "checkboxes", "dropdown"]);
 
 export default function Question({ question, index, isFirst, isLast }) {
   const mode = useFormStore((s) => s.mode);
@@ -44,8 +20,9 @@ export default function Question({ question, index, isFirst, isLast }) {
     removeCorrectAnswerVariation,
   } = useFormActions();
 
-  const Field = FIELD_COMPONENTS[question.type];
-  const TypeIcon = Icons[TYPE_ICON[question.type]];
+  const typeDef = getQuestionType(question.type);
+  const Field = typeDef?.editorComponent;
+  const TypeIcon = typeDef ? Icons[typeDef.icon] : null;
   const isEdit = mode === "edit";
 
   const commitAnswerVariation = () => {
@@ -86,7 +63,7 @@ export default function Question({ question, index, isFirst, isLast }) {
           </select>
         ) : (
           TypeIcon && (
-            <span className="question-type-badge" title={TYPE_LABEL[question.type]}>
+            <span className="question-type-badge" title={typeDef?.label}>
               <TypeIcon />
             </span>
           )
@@ -214,7 +191,7 @@ export default function Question({ question, index, isFirst, isLast }) {
             <Icons.trash />
           </button>
 
-          {GRADABLE_TYPES.has(question.type) && (
+          {typeDef?.isGradable && (
             <>
               <span className="question-divider" />
               <label className="points-input-label">
@@ -235,15 +212,12 @@ export default function Question({ question, index, isFirst, isLast }) {
 
           <span className="question-divider" />
 
-          <label className="required-toggle">
-            Required
-            <input
-              type="checkbox"
-              checked={question.required}
-              onChange={(e) => updateQuestion(question.id, { required: e.target.checked })}
-            />
-            <span className="toggle-switch" />
-          </label>
+          <Toggle
+            className="required-toggle"
+            label="Required"
+            checked={question.required}
+            onChange={(checked) => updateQuestion(question.id, { required: checked })}
+          />
         </div>
         )}
       </div>

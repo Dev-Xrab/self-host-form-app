@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import useAuthStore, { useAuthActions } from "../../../store/useAuthStore";
 import { Icons } from "./icons";
+import SyncStatus from "./SyncStatus";
 import "./dashboard-page.css";
 import logo from "../../images/logo.png";
 
@@ -37,7 +38,7 @@ export default function DashboardLayout() {
                   id="dash-nav-logo"
                   style={{ width: "25px", height: "25px"}}
                 />
-          <p>StoneArch</p>
+          <p>Self Host Form</p>
         </div>
 
         <nav className="dash-nav-list">
@@ -56,6 +57,8 @@ export default function DashboardLayout() {
             );
           })}
         </nav>
+
+        <SyncStatus />
 
         <button type="button" className="dash-nav-logout" onClick={handleLogout}>
           <Icons.logout className="dash-nav-item-icon" />

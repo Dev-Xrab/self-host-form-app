@@ -19,7 +19,7 @@ export default function WindowContainer({
           <span className="role-page-dot" />
 
           <span className="role-page-breadcrumb">
-            StoneArch / {navigationpath}
+            Self Host Form / {navigationpath}
           </span>
         </div>
 

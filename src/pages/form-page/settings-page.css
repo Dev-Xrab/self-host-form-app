@@ -18,12 +18,12 @@
   font-size: 24px;
   font-weight: 600;
   margin: 0;
-  color: #37352f;
+  color: var(--text);
 }
 
 .settings-subtitle {
   font-size: 13px;
-  color: #9b9a97;
+  color: var(--text-tertiary);
   margin: 0;
 }
 
@@ -45,18 +45,18 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: #9b9a97;
+  color: var(--text-tertiary);
 }
 
 .settings-note {
   margin: 4px 0 0;
   padding: 10px 12px;
   border-radius: 6px;
-  background: #f7f7f5;
+  background: var(--surface-bg);
 
   font-size: 12.5px;
   line-height: 1.5;
-  color: #787774;
+  color: var(--text-secondary);
 }
 
 .settings-row {
@@ -66,7 +66,7 @@
   gap: 20px;
 
   padding: 13px 0;
-  border-bottom: 1px solid #f1f1ef;
+  border-bottom: 1px solid var(--surface-muted);
 }
 
 .settings-group .settings-row:last-child {
@@ -83,12 +83,12 @@
 .settings-row-label {
   font-size: 13.5px;
   font-weight: 500;
-  color: #37352f;
+  color: var(--text);
 }
 
 .settings-row-desc {
   font-size: 12px;
-  color: #9b9a97;
+  color: var(--text-tertiary);
 }
 
 .settings-row-control {
@@ -101,101 +101,59 @@
 .settings-timer-input {
   width: 52px;
   padding: 5px 6px;
-  border: 1px solid #e9e9e7;
+  border: 1px solid var(--border);
   border-radius: 5px;
 
   font-family: Inter, sans-serif;
   font-size: 13px;
-  color: #37352f;
-  background: #fff;
+  color: var(--text);
+  background: var(--surface-card);
   text-align: center;
   transition: border-color 120ms ease-out;
 }
 
 .settings-timer-input:focus {
   outline: none;
-  border-color: #9b9a97;
+  border-color: var(--text-tertiary);
 }
 
 .settings-timer-unit {
   font-size: 12.5px;
-  color: #9b9a97;
+  color: var(--text-tertiary);
 }
 
 .settings-subject-select {
   padding: 6px 10px;
-  border: 1px solid #e9e9e7;
+  border: 1px solid var(--border);
   border-radius: 6px;
 
   font-family: Inter, sans-serif;
   font-size: 13px;
-  color: #37352f;
-  background: #fff;
+  color: var(--text);
+  background: var(--surface-card);
 }
 
 .settings-subject-select:focus {
   outline: none;
-  border-color: #9b9a97;
-}
-
-/* Toggle switch (matches the Required toggle on questions) */
-.settings-toggle {
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
-  user-select: none;
-}
-
-.settings-toggle input {
-  display: none;
-}
-
-.settings-toggle-track {
-  position: relative;
-  width: 30px;
-  height: 17px;
-  border-radius: 999px;
-  background: #e9e9e7;
-  transition: background 120ms ease-out;
-}
-
-.settings-toggle-track::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(15, 15, 15, 0.2);
-  transition: transform 120ms ease-out;
-}
-
-.settings-toggle input:checked + .settings-toggle-track {
-  background: #37352f;
-}
-
-.settings-toggle input:checked + .settings-toggle-track::after {
-  transform: translateX(13px);
+  border-color: var(--text-tertiary);
 }
 
 .settings-danger-btn {
   padding: 7px 14px;
-  border: 1px solid #f4c7c2;
+  border: 1px solid var(--danger-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface-card);
 
   font-family: Inter, sans-serif;
   font-size: 13px;
   font-weight: 500;
-  color: #c0392b;
+  color: var(--danger);
   cursor: pointer;
   transition: background 120ms ease-out;
 }
 
 .settings-danger-btn:hover {
-  background: #fceceb;
+  background: var(--danger-bg);
 }
 
 .settings-danger-btn:disabled {
@@ -205,64 +163,23 @@
 
 .settings-ghost-btn {
   padding: 7px 14px;
-  border: 1px solid #e9e9e7;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface-card);
 
   font-family: Inter, sans-serif;
   font-size: 13px;
   font-weight: 500;
-  color: #37352f;
+  color: var(--text);
   cursor: pointer;
 }
 
 .settings-ghost-btn:hover {
-  background: #f7f7f5;
+  background: var(--surface-bg);
 }
 
-.settings-confirm-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  background: rgba(15, 15, 15, 0.35);
-}
-
-.settings-confirm-dialog {
-  width: 380px;
-  max-width: calc(100vw - 32px);
-  padding: 22px;
-  box-sizing: border-box;
-
-  background: #fff;
-  border-radius: 10px;
-}
-
-.settings-confirm-dialog h2 {
-  margin: 0 0 8px;
-  font-size: 16px;
-  font-weight: 600;
-  color: #37352f;
-}
-
-.settings-confirm-dialog p {
-  margin: 0 0 16px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #787774;
-}
-
+/* Delete confirmation now uses the shared ConfirmDialog (src/components/Dialog) instead of a
+   custom overlay — only the inline export-error text style below is still used on this page. */
 .settings-confirm-error {
-  color: #c0392b !important;
-}
-
-.settings-confirm-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  color: var(--danger) !important;
 }

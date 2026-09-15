@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { formsApi } from '../src/features/forms/services/formsApi';
-
-const OPTION_TYPES = new Set(["multiple_choice", "checkboxes", "dropdown"]);
+import { getQuestionType, createQuestionDefaults } from '../src/lib/questionRegistry';
+import { createMatrixRow, createMatrixColumn, buildPresetColumns, DEFAULT_MATRIX_SETTINGS } from '../src/lib/matrixQuestions';
 
 let fallbackId = 0;
 const nextId = () =>
@@ -17,8 +17,8 @@ const createQuestion = (type) => ({
   showDescription: false,
   showImage: false,
   required: false,
-  options: OPTION_TYPES.has(type) ? ["Option 1"] : [],
-  scale: { min: 1, max: 5, minLabel: "", maxLabel: "" },
+  rows: [],
+  ...createQuestionDefaults(type),
   imageUrl: null,
   correctAnswerIndex: [],
   correctAnswers: [],
@@ -62,7 +62,11 @@ const useFormStore = create((set, get) => ({
         formDescription: form.description,
         subjectId: form.subjectId ?? null,
         formSettings: { ...DEFAULT_FORM_SETTINGS, ...form.settings },
-        questions: form.questions,
+        // A question a Google structural sync marked removed (see server/forms/questionDiff.js)
+        // is kept server-side so its past answers stay labeled in All Responses, but it has no
+        // place in the live editor/respondent form — excluded here, and the server independently
+        // re-preserves it on save regardless of what this array contains (see updateForm).
+        questions: (form.questions || []).filter((q) => !q.removedAt),
         mode: "edit",
         saveStatus: "idle",
         saveError: null,
@@ -115,8 +119,29 @@ const useFormStore = create((set, get) => ({
         questions: state.questions.map((q) => {
           if (q.id !== id) return q;
           if (q.type === type) return q;
-          const needsOptions = OPTION_TYPES.has(type);
-          const isSingleSelect = type === "multiple_choice" || type === "dropdown";
+          const prevDef = getQuestionType(q.type);
+          const def = getQuestionType(type);
+          const wasGrid = !!prevDef?.isGridBased;
+          const isGrid = !!def?.isGridBased;
+
+          // Switching between the two grid types keeps rows/columns/settings as-is — only
+          // the per-row selection behavior (single vs. multi) changes, not the shared scale.
+          if (isGrid && wasGrid) {
+            return { ...q, type };
+          }
+
+          if (isGrid && !wasGrid) {
+            const defaults = createQuestionDefaults(type);
+            return { ...q, type, ...defaults, correctAnswerIndex: [], correctAnswers: [] };
+          }
+
+          if (!isGrid && wasGrid) {
+            const defaults = createQuestionDefaults(type);
+            return { ...q, type, ...defaults, correctAnswerIndex: [], correctAnswers: [] };
+          }
+
+          const needsOptions = !!def?.isOptionBased;
+          const isSingleSelect = !!def?.isSingleSelect;
           return {
             ...q,
             type,
@@ -124,7 +149,7 @@ const useFormStore = create((set, get) => ({
             correctAnswerIndex: needsOptions
               ? (isSingleSelect ? q.correctAnswerIndex.slice(0, 1) : q.correctAnswerIndex)
               : [],
-            correctAnswers: ["short_answer", "paragraph"].includes(type) ? q.correctAnswers : [],
+            correctAnswers: def?.usesTextAnswerKey ? q.correctAnswers : [],
           };
         }),
       }));
@@ -202,6 +227,116 @@ const useFormStore = create((set, get) => ({
         questions: state.questions.map((q) =>
           q.id === id ? { ...q, scale: { ...q.scale, ...patch } } : q
         ),
+      }));
+    },
+
+    updateMatrixSettings: (id, patch) => {
+      if (get().mode === "view") return;
+      set((state) => ({
+        questions: state.questions.map((q) =>
+          q.id === id ? { ...q, scale: { ...DEFAULT_MATRIX_SETTINGS, ...q.scale, ...patch } } : q
+        ),
+      }));
+    },
+
+    addMatrixRow: (id) => {
+      if (get().mode === "view") return;
+      set((state) => ({
+        questions: state.questions.map((q) =>
+          q.id === id
+            ? { ...q, rows: [...q.rows, createMatrixRow(`Row ${q.rows.length + 1}`)] }
+            : q
+        ),
+      }));
+    },
+
+    updateMatrixRow: (id, rowId, label) => {
+      if (get().mode === "view") return;
+      set((state) => ({
+        questions: state.questions.map((q) =>
+          q.id === id
+            ? { ...q, rows: q.rows.map((r) => (r.id === rowId ? { ...r, label } : r)) }
+            : q
+        ),
+      }));
+    },
+
+    removeMatrixRow: (id, rowId) => {
+      if (get().mode === "view") return;
+      set((state) => ({
+        questions: state.questions.map((q) =>
+          q.id === id ? { ...q, rows: q.rows.filter((r) => r.id !== rowId) } : q
+        ),
+      }));
+    },
+
+    moveMatrixRow: (id, rowId, direction) => {
+      if (get().mode === "view") return;
+      set((state) => ({
+        questions: state.questions.map((q) => {
+          if (q.id !== id) return q;
+          const index = q.rows.findIndex((r) => r.id === rowId);
+          const target = index + direction;
+          if (index === -1 || target < 0 || target >= q.rows.length) return q;
+          const rows = [...q.rows];
+          [rows[index], rows[target]] = [rows[target], rows[index]];
+          return { ...q, rows };
+        }),
+      }));
+    },
+
+    addMatrixColumn: (id) => {
+      if (get().mode === "view") return;
+      set((state) => ({
+        questions: state.questions.map((q) =>
+          q.id === id
+            ? { ...q, options: [...q.options, createMatrixColumn(`Column ${q.options.length + 1}`, q.options.length + 1)] }
+            : q
+        ),
+      }));
+    },
+
+    updateMatrixColumn: (id, columnId, patch) => {
+      if (get().mode === "view") return;
+      set((state) => ({
+        questions: state.questions.map((q) =>
+          q.id === id
+            ? { ...q, options: q.options.map((c) => (c.id === columnId ? { ...c, ...patch } : c)) }
+            : q
+        ),
+      }));
+    },
+
+    removeMatrixColumn: (id, columnId) => {
+      if (get().mode === "view") return;
+      set((state) => ({
+        questions: state.questions.map((q) =>
+          q.id === id ? { ...q, options: q.options.filter((c) => c.id !== columnId) } : q
+        ),
+      }));
+    },
+
+    moveMatrixColumn: (id, columnId, direction) => {
+      if (get().mode === "view") return;
+      set((state) => ({
+        questions: state.questions.map((q) => {
+          if (q.id !== id) return q;
+          const index = q.options.findIndex((c) => c.id === columnId);
+          const target = index + direction;
+          if (index === -1 || target < 0 || target >= q.options.length) return q;
+          const options = [...q.options];
+          [options[index], options[target]] = [options[target], options[index]];
+          return { ...q, options };
+        }),
+      }));
+    },
+
+    applyMatrixColumnPreset: (id, presetId) => {
+      if (get().mode === "view") return;
+      const columns = buildPresetColumns(presetId);
+      if (!columns) return;
+      set((state) => ({
+        questions: state.questions.map((q) => (q.id === id ? { ...q, options: columns } : q)),
       }));
     },
 

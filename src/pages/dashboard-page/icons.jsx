@@ -208,4 +208,15 @@ export const Icons = {
       <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
     </>
   ),
+
+  cloud: makeIcon(
+    <path d="M7.5 18.5a4.5 4.5 0 0 1-.5-8.98A5.5 5.5 0 0 1 17.9 8.1 4 4 0 0 1 17 16H7.5Z" />
+  ),
+
+  refresh: makeIcon(
+    <>
+      <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+      <path d="M20 4v5h-5" />
+    </>
+  ),
 };

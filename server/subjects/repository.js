@@ -28,6 +28,14 @@ export function listSubjects() {
   return selectAllStmt.all().map(rowToSubject);
 }
 
+// The permanent "General" subject's row — guaranteed to exist once ensureDefaultSubject() has
+// run at boot (server/index.js). Used to resolve a form's subjectId when none was given, instead
+// of leaving it NULL (see server/forms/repository.js).
+export function getDefaultSubject() {
+  const row = selectDefaultStmt.get();
+  return row ? rowToSubject(row) : null;
+}
+
 export function getSubject(id) {
   const row = selectOneStmt.get(id);
   return row ? rowToSubject(row) : null;

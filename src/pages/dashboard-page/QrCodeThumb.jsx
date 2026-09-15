@@ -1,5 +1,5 @@
 import { useState } from "react";
-import Modal from "./Modal";
+import Dialog from "../../components/Dialog/Dialog";
 import QrCode from "./QrCode";
 
 // Always-visible QR thumbnail; clicking it opens a larger, scannable version in a modal.
@@ -18,12 +18,12 @@ export default function QrCodeThumb({ value, size = 44, modalTitle = "Scan to op
       </button>
 
       {expanded && (
-        <Modal title={modalTitle} onClose={() => setExpanded(false)}>
+        <Dialog title={modalTitle} onClose={() => setExpanded(false)}>
           <div className="qr-code-modal-body">
             <QrCode value={value} size={260} />
             <code className="qr-code-modal-value">{value}</code>
           </div>
-        </Modal>
+        </Dialog>
       )}
     </>
   );

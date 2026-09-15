@@ -130,18 +130,18 @@ export default function DashboardHome() {
           </div>
         </div>
 
-        <div className="dash-stats-row">
+        <div className="dash-card dash-kpi-strip">
           {STATS.map((stat) => {
             const Icon = Icons[stat.icon];
             return (
-              <div className="dash-card stat-card" key={stat.label}>
-                <div className="stat-card-top">
+              <div className="dash-kpi-segment" key={stat.label}>
+                <div className="dash-kpi-top">
                   <span className="dashboard-card-label">{stat.label}</span>
-                  <span className="stat-card-icon">
+                  <span className="dash-kpi-icon">
                     <Icon />
                   </span>
                 </div>
-                <span className="stat-card-value">{stat.value}</span>
+                <span className="dash-kpi-value">{stat.value}</span>
               </div>
             );
           })}
@@ -156,18 +156,25 @@ export default function DashboardHome() {
             </Link>
           </div>
 
-          <div className="dash-card-grid">
-            {subjects.length === 0 && <p className="dash-empty">No subjects yet.</p>}
-            {subjects.slice(0, 3).map((subject) => (
-              <Link className="dash-item-card dash-item-card-link" key={subject.id} to={`/dashboard/subjects/${subject.id}`}>
-                <Monogram label={initial(subject.name)} />
-                <span className="dash-item-title">{subject.name}</span>
-                {subject.code && <span className="dash-item-subtitle">{subject.code}</span>}
-                <span className="dash-item-divider" />
-                <span className="dash-item-meta">Form Count: {subject.formCount}</span>
-              </Link>
-            ))}
-          </div>
+          {subjects.length === 0 ? (
+            <p className="dash-empty">No subjects yet.</p>
+          ) : (
+            <div className="dash-list">
+              {subjects.slice(0, 5).map((subject) => (
+                <Link className="dash-list-row" key={subject.id} to={`/dashboard/subjects/${subject.id}`}>
+                  <Monogram label={initial(subject.name)} size={32} />
+                  <div className="dash-list-text">
+                    <span className="dash-list-title">{subject.name}</span>
+                    {subject.code && <span className="dash-list-subtitle">{subject.code}</span>}
+                  </div>
+                  <span className="dash-list-meta">
+                    {subject.formCount} form{subject.formCount === 1 ? "" : "s"}
+                  </span>
+                  <Icons.arrowRight className="dash-list-arrow" />
+                </Link>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="dash-section">
@@ -179,19 +186,24 @@ export default function DashboardHome() {
             </Link>
           </div>
 
-          <div className="dash-card-grid">
-            {forms.length === 0 && <p className="dash-empty">No forms yet.</p>}
-            {forms.slice(0, 4).map((form) => (
-              <Link className="dash-item-card dash-item-card-link" key={form.id} to={`/forms/${form.id}`}>
-                <Monogram label={<Icons.fileText />} />
-                <span className="dash-item-title">{form.title || "Untitled form"}</span>
-                <span className="dash-item-divider" />
-                <span className="dash-item-meta">
-                  {form.questionCount} question{form.questionCount === 1 ? "" : "s"}
-                </span>
-              </Link>
-            ))}
-          </div>
+          {forms.length === 0 ? (
+            <p className="dash-empty">No forms yet.</p>
+          ) : (
+            <div className="dash-list">
+              {forms.slice(0, 6).map((form) => (
+                <Link className="dash-list-row" key={form.id} to={`/forms/${form.id}`}>
+                  <Monogram label={<Icons.fileText />} size={32} />
+                  <div className="dash-list-text">
+                    <span className="dash-list-title">{form.title || "Untitled form"}</span>
+                  </div>
+                  <span className="dash-list-meta">
+                    {form.questionCount} question{form.questionCount === 1 ? "" : "s"}
+                  </span>
+                  <Icons.arrowRight className="dash-list-arrow" />
+                </Link>
+              ))}
+            </div>
+          )}
         </section>
       </div>
     </>
