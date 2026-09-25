@@ -1,6 +1,6 @@
 .form-page {
   width: 100%;
-  min-height: 100vh;
+  min-height: calc(100vh - var(--titlebar-height));
 
   display: flex;
 
@@ -43,14 +43,9 @@
 .form-page-message {
   width: 100%;
   padding: 64px 32px;
-  text-align: center;
-
-  font-family: Inter, sans-serif;
-  font-size: 14px;
-  color: var(--text-tertiary);
 }
 
-.form-page-message-error {
+.form-page-message-error .ui-empty-description {
   color: var(--danger);
 }
 

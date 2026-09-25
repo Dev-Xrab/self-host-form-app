@@ -44,4 +44,11 @@ export const responsesApi = {
       method: "POST",
       body: JSON.stringify({ deviceId }),
     }),
+  // Tells the server this device's tab just went hidden, so it can anchor the tab-refocus
+  // countdown to a timestamp that survives a reload — see RespondForm's visibilitychange handler.
+  startRefocusLock: (id, deviceId) =>
+    request(`${BASE}/responses/${id}/refocus-lock`, {
+      method: "POST",
+      body: JSON.stringify({ deviceId }),
+    }),
 };

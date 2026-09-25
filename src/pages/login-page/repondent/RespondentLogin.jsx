@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { responsesApi } from "../../../features/responses/services/responsesApi";
 import { getDeviceId } from "../../../features/responses/utils/deviceId";
-import "./respondent-login.css";
+import Button from "../../../components/ui/Button";
+import "../auth-page.css";
 import logo from "../../../../src/images/logo.png";
 
 const NAME_STORAGE_KEY = "stonearch_respondent_name";
@@ -56,7 +57,7 @@ export default function RespondentLogin() {
   }
 
   return (
-    <div className="respondent-login-content">
+    <div className="auth-content">
       <img
               src={logo}
               alt="Host login illustration"
@@ -64,12 +65,12 @@ export default function RespondentLogin() {
               style={{ width: "50px", height: "50px", paddingBottom: "10px" }}
             />
       <h1>Join as a Responder</h1>
-      <p className="respondent-login-subtitle">
+      <p className="auth-subtitle">
         Enter your details to continue to the form.
       </p>
 
-      <form className="respondent-login-form" onSubmit={handleSubmit} noValidate>
-        <div className="respondent-login-field">
+      <form className="auth-form" onSubmit={handleSubmit} noValidate>
+        <div className="auth-field">
           <label htmlFor="respondent-identifier">
             Identifier <span className="required-mark">*</span>
           </label>
@@ -85,11 +86,11 @@ export default function RespondentLogin() {
             className={errors.identifier ? "input-error" : ""}
           />
           {errors.identifier && (
-            <span className="respondent-login-error">{errors.identifier}</span>
+            <span className="auth-error">{errors.identifier}</span>
           )}
         </div>
 
-        <div className="respondent-login-field">
+        <div className="auth-field">
           <label htmlFor="respondent-session-code">
             Session Code <span className="required-mark">*</span>
           </label>
@@ -106,16 +107,16 @@ export default function RespondentLogin() {
             maxLength={8}
           />
           {errors.sessionCode && (
-            <span className="respondent-login-error">{errors.sessionCode}</span>
+            <span className="auth-error">{errors.sessionCode}</span>
           )}
         </div>
 
-        <button type="submit" className="respondent-login-submit" disabled={submitting}>
+        <Button type="submit" fullWidth disabled={submitting}>
           {submitting ? "Joining…" : "Continue"}
-        </button>
+        </Button>
       </form>
 
-      <p className="respondent-login-footer">
+      <p className="auth-footer">
         Hosting a form instead?{" "}
         <Link to="/host/login">Continue as a Hoster</Link>
       </p>

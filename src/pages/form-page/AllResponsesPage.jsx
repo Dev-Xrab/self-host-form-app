@@ -3,29 +3,34 @@ import { useParams } from "react-router-dom";
 import { formsApi } from "../../features/forms/services/formsApi";
 import { cloudApi } from "../../features/cloud/services/cloudApi";
 import RespondentDetailModal from "../../features/sessions/components/RespondentDetailModal";
+import SaveResponsesPrompt from "../../features/cloud/components/SaveResponsesPrompt";
 import GoogleSyncDialog from "../../features/cloud/components/GoogleSyncDialog";
 import { describeCloudError } from "../../features/cloud/utils/describeCloudError";
-import { aggregateQuestion } from "../../features/forms/utils/responseAnalytics";
+import { aggregateQuestion, percentOf } from "../../features/forms/utils/responseAnalytics";
 import ExportResponsesDialog from "../../features/forms/components/ExportResponsesDialog";
 import { useSubjects } from "../../features/subjects/hooks/useSubjects";
 import { Icons } from "../dashboard-page/icons";
 import "./all-responses.css";
 
+// Bar length and label share one number (count / total), so a 40% option is a 40%-long bar —
+// not scaled against the biggest option, which made every top bar look full regardless of share.
 function BarRows({ entries, total }) {
-  const maxCount = Math.max(1, ...entries.map((e) => e.count || 0));
-  return entries.map((e) => (
-    <div className="all-responses-bar-row" key={e.label}>
-      <span className="all-responses-bar-label" title={e.label}>
-        {e.label}
-      </span>
-      <span className="all-responses-bar-track">
-        <span className="all-responses-bar-fill" style={{ width: `${Math.round((e.count / maxCount) * 100)}%` }} />
-      </span>
-      <span className="all-responses-bar-count">
-        {e.count} ({total ? Math.round((e.count / total) * 100) : 0}%)
-      </span>
-    </div>
-  ));
+  return entries.map((e) => {
+    const pct = percentOf(e.count, total);
+    return (
+      <div className="all-responses-bar-row" key={e.label}>
+        <span className="all-responses-bar-label" title={e.label}>
+          {e.label}
+        </span>
+        <span className="all-responses-bar-track">
+          <span className="all-responses-bar-fill" style={{ width: `${pct}%` }} />
+        </span>
+        <span className="all-responses-bar-count">
+          {e.count} ({pct}%)
+        </span>
+      </div>
+    );
+  });
 }
 
 function QuestionBlock({ question, responses }) {
@@ -38,6 +43,7 @@ function QuestionBlock({ question, responses }) {
       <p className="all-responses-question-title">{question.title || "Untitled question"}</p>
       <p className="all-responses-question-meta">
         {total} response{total === 1 ? "" : "s"}
+        {question.type === "checkboxes" && " · % of respondents, can add up to more than 100%"}
       </p>
 
       {kind === "matrix" ? (
@@ -123,6 +129,7 @@ export default function AllResponsesPage() {
   const [changeDiff, setChangeDiff] = useState(null);
   const [applyingChanges, setApplyingChanges] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [dismissedSavePrompt, setDismissedSavePrompt] = useState(false);
   const { subjects } = useSubjects();
 
   const load = () => {
@@ -289,6 +296,17 @@ export default function AllResponsesPage() {
             ? "no new responses found."
             : `${syncResult.newResponseCount} new response${syncResult.newResponseCount === 1 ? "" : "s"} imported, ${syncResult.unchangedResponseCount} existing response${syncResult.unchangedResponseCount === 1 ? "" : "s"} unchanged.`}
         </p>
+      )}
+
+      {form.unsavedResponseCount > 0 && !dismissedSavePrompt && (
+        <SaveResponsesPrompt
+          count={form.unsavedResponseCount}
+          onSave={async () => {
+            await cloudApi.saveGoogleResponsesToCloud(formId);
+            load();
+          }}
+          onDismiss={() => setDismissedSavePrompt(true)}
+        />
       )}
 
       {changeDiff && (

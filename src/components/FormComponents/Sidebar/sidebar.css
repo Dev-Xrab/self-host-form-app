@@ -2,9 +2,9 @@
 .form-sidebar {
   flex-shrink: 0;
   width: 260px;
-  height: 100vh;
+  height: calc(100vh - var(--titlebar-height));
   position: sticky;
-  top: 0;
+  top: var(--titlebar-height);
 
   display: flex;
   flex-direction: column;
@@ -90,6 +90,15 @@
   font-size: 12px;
   color: var(--text-secondary);
   text-align: center;
+}
+
+/* The "Changes not saved to cloud" note is a button (it reopens the save prompt). */
+button.form-sidebar-save-note {
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .form-sidebar-nav {

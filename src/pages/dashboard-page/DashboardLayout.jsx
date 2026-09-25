@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import useAuthStore, { useAuthActions } from "../../../store/useAuthStore";
 import { Icons } from "./icons";
@@ -8,10 +9,9 @@ import logo from "../../images/logo.png";
 const NAV_ITEMS = [
   { to: "/dashboard", label: "Dashboard", icon: "grid", end: true },
   { to: "/dashboard/sessions", label: "Sessions", icon: "clipboard" },
-  { to: "/dashboard/subjects", label: "Subjects", icon: "book" },
+  { to: "/dashboard/subjects", label: "Folders", icon: "folder" },
   { to: "/dashboard/forms", label: "Forms", icon: "fileText" },
   { to: "/dashboard/export", label: "Bulk Export", icon: "download" },
-  { to: "/dashboard/gradebook", label: "Gradebook", icon: "table" },
   { to: "/dashboard/settings", label: "Settings", icon: "settings" },
 ];
 
@@ -21,6 +21,14 @@ export default function DashboardLayout() {
   const { logout } = useAuthActions();
   const hasRecoveryQuestion = useAuthStore((s) => s.hasRecoveryQuestion);
   const onSettingsPage = location.pathname === "/dashboard/settings";
+  const [navOpen, setNavOpen] = useState(false);
+
+  // Below the breakpoint where the sidebar becomes a top bar, the nav links move into a
+  // collapsible dropdown (see dash-nav-toggle/dash-nav-collapsible in dashboard-page.css) —
+  // always close it after a navigation so it doesn't stay open over the next page.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     await logout();
@@ -29,7 +37,7 @@ export default function DashboardLayout() {
 
   return (
     <div className="dash">
-      <aside className="dash-nav">
+      <aside className={`dash-nav ${navOpen ? "dash-nav-open" : ""}`}>
         <div className="dash-nav-brand">
           <img
 
@@ -39,31 +47,42 @@ export default function DashboardLayout() {
                   style={{ width: "25px", height: "25px"}}
                 />
           <p>Self Host Form</p>
+          <button
+            type="button"
+            className="dash-nav-toggle"
+            aria-label={navOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-expanded={navOpen}
+            onClick={() => setNavOpen((v) => !v)}
+          >
+            {navOpen ? <Icons.close /> : <Icons.menu />}
+          </button>
         </div>
 
-        <nav className="dash-nav-list">
-          {NAV_ITEMS.map((item) => {
-            const Icon = Icons[item.icon];
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) => `dash-nav-item ${isActive ? "dash-nav-item-active" : ""}`}
-              >
-                <Icon className="dash-nav-item-icon" />
-                {item.label}
-              </NavLink>
-            );
-          })}
-        </nav>
+        <div className="dash-nav-collapsible">
+          <nav className="dash-nav-list">
+            {NAV_ITEMS.map((item) => {
+              const Icon = Icons[item.icon];
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) => `dash-nav-item ${isActive ? "dash-nav-item-active" : ""}`}
+                >
+                  <Icon className="dash-nav-item-icon" />
+                  {item.label}
+                </NavLink>
+              );
+            })}
+          </nav>
 
-        <SyncStatus />
+          <SyncStatus />
 
-        <button type="button" className="dash-nav-logout" onClick={handleLogout}>
-          <Icons.logout className="dash-nav-item-icon" />
-          Logout
-        </button>
+          <button type="button" className="dash-nav-logout" onClick={handleLogout}>
+            <Icons.logout className="dash-nav-item-icon" />
+            Logout
+          </button>
+        </div>
       </aside>
 
       <main className="dash-main">

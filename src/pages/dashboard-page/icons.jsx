@@ -1,20 +1,6 @@
-const makeIcon = (paths) =>
-  function IconComponent({ className = "", ...rest }) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        className={`dash-icon ${className}`}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        {...rest}
-      >
-        {paths}
-      </svg>
-    );
-  };
+import makeIconFactory from "../../lib/makeIcon";
+
+const makeIcon = (paths) => makeIconFactory(paths, "dash-icon");
 
 export const Icons = {
   table: makeIcon(
@@ -119,6 +105,14 @@ export const Icons = {
     </>
   ),
 
+  menu: makeIcon(
+    <>
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="17" x2="20" y2="17" />
+    </>
+  ),
+
   arrowLeft: makeIcon(
     <>
       <line x1="20" y1="12" x2="6" y2="12" />
@@ -185,6 +179,7 @@ export const Icons = {
   chevronLeft: makeIcon(<path d="M14.5 5.5l-6.5 6.5 6.5 6.5" />),
 
   chevronRight: makeIcon(<path d="M9.5 5.5l6.5 6.5-6.5 6.5" />),
+  chevronDown: makeIcon(<path d="M5.5 9.5l6.5 6.5 6.5-6.5" />),
 
   printer: makeIcon(
     <>
@@ -217,6 +212,24 @@ export const Icons = {
     <>
       <path d="M20 12a8 8 0 1 1-2.34-5.66" />
       <path d="M20 4v5h-5" />
+    </>
+  ),
+
+  folder: makeIcon(
+    <path d="M4 6.5A1.5 1.5 0 0 1 5.5 5h4l2 2.5h7A1.5 1.5 0 0 1 20 9v8.5A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-11Z" />
+  ),
+
+  folderOpen: makeIcon(
+    <>
+      <path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h4l2 2h7a1.5 1.5 0 0 1 1.45 1.87l-1.5 6A1.5 1.5 0 0 1 17.02 18H5.5A1.5 1.5 0 0 1 4 16.5v-8Z" />
+    </>
+  ),
+
+  globe: makeIcon(
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <ellipse cx="12" cy="12" rx="3.6" ry="8.5" />
+      <line x1="3.5" y1="12" x2="20.5" y2="12" />
     </>
   ),
 };

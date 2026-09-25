@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
-
-const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB — keeps SQLite rows and JSON payloads reasonable for local self-hosting.
+import { MAX_UPLOAD_BYTES, UPLOAD_ACCEPT, isAllowedUploadType } from "../../../lib/fileTypes";
 
 export default function FileUploadField({ value, onChange, disabled }) {
   const inputRef = useRef(null);
@@ -12,8 +11,14 @@ export default function FileUploadField({ value, onChange, disabled }) {
     e.target.value = "";
     if (!file) return;
 
-    if (file.size > MAX_FILE_BYTES) {
+    // 5MB keeps SQLite rows and JSON payloads reasonable for local self-hosting. The server
+    // re-checks size, type, and the file's actual contents (server/security/uploads.js).
+    if (file.size > MAX_UPLOAD_BYTES) {
       setError("File is too large (max 5MB).");
+      return;
+    }
+    if (!isAllowedUploadType(file.type)) {
+      setError("This type of file can't be uploaded. Use an image, PDF, document, audio, video, or text file.");
       return;
     }
 
@@ -52,7 +57,7 @@ export default function FileUploadField({ value, onChange, disabled }) {
         </button>
       )}
       {error && <span className="answer-file-error">{error}</span>}
-      <input ref={inputRef} type="file" className="answer-file-input" onChange={handleFile} />
+      <input ref={inputRef} type="file" accept={UPLOAD_ACCEPT} className="answer-file-input" onChange={handleFile} />
     </div>
   );
 }

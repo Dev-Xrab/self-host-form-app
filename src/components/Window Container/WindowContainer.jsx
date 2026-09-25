@@ -14,10 +14,6 @@ export default function WindowContainer({
     <div className={`role-page-wrapper ${center ? "role-page-wrapper-centered" : ""}`}>
       <div className="role-page-window">
         <div className="role-page-topbar">
-          <span className="role-page-dot" />
-          <span className="role-page-dot" />
-          <span className="role-page-dot" />
-
           <span className="role-page-breadcrumb">
             Self Host Form / {navigationpath}
           </span>

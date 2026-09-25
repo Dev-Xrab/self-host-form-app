@@ -2,10 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import QuestionPager from "../components/QuestionPager";
 import { responsesApi } from "../services/responsesApi";
+import { useServerConnection } from "../hooks/useServerConnection";
+import { useCopyProtection } from "../hooks/useCopyProtection";
+import { useBodyScrollLock } from "../../../hooks/useBodyScrollLock";
+import ConnectionOverlay from "../components/ConnectionOverlay";
+import RefocusLockOverlay from "../components/RefocusLockOverlay";
+import FullscreenGateOverlay from "../components/FullscreenGateOverlay";
 import { getDeviceId } from "../utils/deviceId";
-import { downloadAnswersAsText } from "../utils/downloadAnswers";
+import { downloadAnswersAsPdf } from "../utils/downloadAnswers";
 import { groupIntoPages } from "../utils/groupIntoPages";
-import { enterFullscreen, exitFullscreen } from "../utils/fullscreen";
+import { enterFullscreen, exitFullscreen, isFullscreenActive } from "../utils/fullscreen";
 import { formatClock, secondsRemaining } from "../../sessions/utils/time";
 import { isMatrixQuestion, getMatrixMissingRows, matrixRequiredMessage } from "../../../lib/matrixQuestions";
 import "./respond-form.css";
@@ -66,6 +72,7 @@ export default function RespondForm() {
 
   const [pageStatus, setPageStatus] = useState("loading"); // loading | not-found | join | answering | done
   const [sessionInfo, setSessionInfo] = useState(null);
+  const [sessionMeta, setSessionMeta] = useState(null);
 
   const [name, setName] = useState(() => {
     try {
@@ -96,6 +103,7 @@ export default function RespondForm() {
   const [result, setResult] = useState(null);
   const [autoSubmitted, setAutoSubmitted] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const [secondsLeft, setSecondsLeft] = useState(null);
   const submitStatusRef = useRef("idle");
@@ -152,6 +160,16 @@ export default function RespondForm() {
 
   const applyJoinPayload = (payload) => {
     setResponseId(payload.responseId);
+    // Carries session-level settings (refocusLockSeconds, fullscreenEnabled) that stay relevant
+    // once "answering" is reached — unlike sessionInfo (from the pre-join GET), this is populated
+    // on every path into "answering", including a silent same-device resume that never touches
+    // sessionInfo at all.
+    setSessionMeta(payload.session);
+    // Anchored to the server-held timestamp from the moment this device's tab last went hidden
+    // (see server/db/index.js's comment on refocus_locked_until) rather than starting fresh here —
+    // otherwise a reload while the countdown is running (or right after returning) would silently
+    // skip the rest of it.
+    setRefocusLockedUntil(payload.refocusLockedUntil ? new Date(payload.refocusLockedUntil).getTime() : null);
     if (payload.status === "submitted") {
       clearStoredAnswers(payload.responseId);
       setResult(payload);
@@ -175,7 +193,9 @@ export default function RespondForm() {
     e.preventDefault();
     // Must be called synchronously inside this click handler — after the `await` below,
     // the browser no longer considers this a user gesture and silently ignores the request.
-    enterFullscreen();
+    // Session setting, off by default: the respondent can still enter fullscreen manually
+    // from the toolbar either way.
+    if (sessionInfo?.fullscreenEnabled) enterFullscreen();
     setJoining(true);
     setJoinError(null);
     try {
@@ -195,7 +215,7 @@ export default function RespondForm() {
 
   const handleEditCodeSubmit = async (e) => {
     e.preventDefault();
-    enterFullscreen();
+    if (sessionInfo?.fullscreenEnabled) enterFullscreen();
     setSubmittingEditCode(true);
     setEditCodeError(null);
     try {
@@ -209,7 +229,7 @@ export default function RespondForm() {
   };
 
   const handleEditFromDone = async () => {
-    enterFullscreen();
+    if (result?.session?.fullscreenEnabled) enterFullscreen();
     setReopening(true);
     setReopenError(null);
     try {
@@ -362,6 +382,91 @@ export default function RespondForm() {
     return () => exitFullscreen();
   }, []);
 
+  // Fullscreen can be lost for reasons outside our own exitFullscreen() calls — the respondent
+  // presses Esc/F11, a native file-picker opens (browsers force it closed for that), the window
+  // loses focus, or a silent resume (this device already had an in-progress response, so
+  // "answering" is reached on page load with no click at all to request it from) never entered
+  // it in the first place. Reflecting the real state, tracked here, is what lets the toolbar
+  // button below always offer a real way back in rather than assuming a request made earlier is
+  // still in effect.
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const update = () => setIsFullscreen(isFullscreenActive());
+    update();
+    const events = ["fullscreenchange", "webkitfullscreenchange", "MSFullscreenChange"];
+    events.forEach((evt) => document.addEventListener(evt, update));
+    return () => events.forEach((evt) => document.removeEventListener(evt, update));
+  }, []);
+
+  const handleToggleFullscreen = () => {
+    // Synchronous, direct from this click — the one thing the Fullscreen API actually requires.
+    if (isFullscreen) exitFullscreen();
+    else enterFullscreen();
+  };
+
+  // Per-form setting: blur and lock the screen while this device can't reach the server. Only
+  // relevant where the server is actually needed — the join screen and while answering.
+  const guardEnabled =
+    !!(form?.settings?.blurOnDisconnect ?? sessionInfo?.blurOnDisconnect) &&
+    (pageStatus === "join" || pageStatus === "answering");
+  const online = useServerConnection(guardEnabled);
+  const blocked = guardEnabled && !online;
+
+  // Session setting: hold the respondent on a countdown when they switch back to this tab after
+  // having switched away from it — a deterrent against looking something up elsewhere mid-quiz.
+  // Purely a viewing delay: it doesn't pause or extend the quiz deadline above. The countdown's
+  // target time (refocusLockedUntil, epoch ms) is seeded from the server on every join/resume —
+  // see applyJoinPayload — and refreshed via startRefocusLock the instant the tab goes hidden, so
+  // it's the server's clock a reload has to catch up to, not a piece of state a reload can erase.
+  const refocusLockSeconds = sessionMeta?.refocusLockSeconds || 0;
+  const [refocusLockedUntil, setRefocusLockedUntil] = useState(null);
+  const [refocusCountdown, setRefocusCountdown] = useState(0);
+
+  useEffect(() => {
+    if (pageStatus !== "answering" || !refocusLockSeconds || !responseId) return undefined;
+    const handleVisibility = () => {
+      if (document.visibilityState !== "hidden") return;
+      setRefocusLockedUntil(Date.now() + refocusLockSeconds * 1000);
+      responsesApi.startRefocusLock(responseId, getDeviceId()).catch(() => {});
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [pageStatus, refocusLockSeconds, responseId]);
+
+  useEffect(() => {
+    if (!refocusLockedUntil) {
+      setRefocusCountdown(0);
+      return undefined;
+    }
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((refocusLockedUntil - Date.now()) / 1000));
+      setRefocusCountdown(remaining);
+      if (remaining <= 0) setRefocusLockedUntil(null);
+    };
+    tick();
+    const interval = setInterval(tick, 250);
+    return () => clearInterval(interval);
+  }, [refocusLockedUntil]);
+
+  // Session setting: the answering screen must stay in fullscreen the whole time. Reactive to
+  // real browser fullscreen state (via the fullscreenchange listener above) rather than checked
+  // once, so reloading, pressing Esc, or the browser dropping fullscreen for any other reason all
+  // land back on this gate instead of silently leaving fullscreen off — the Fullscreen API only
+  // grants it from inside an actual click, so re-entering always needs the button below, never
+  // happens silently.
+  const needsFullscreenGate =
+    pageStatus === "answering" && !!sessionMeta?.fullscreenEnabled && !isFullscreen && !blocked && refocusCountdown <= 0;
+
+  // The "Leave quiz?" confirmation isn't built on the shared Dialog (it uses this page's own
+  // rf-* visual language), so it needs its own scroll lock the same way.
+  useBodyScrollLock(showExitConfirm);
+
+  // Per-form setting: discourage copying the questions (see useCopyProtection).
+  useCopyProtection(
+    !!(form?.settings?.restrictCopying ?? sessionInfo?.restrictCopying) &&
+      (pageStatus === "join" || pageStatus === "answering" || pageStatus === "done")
+  );
+
   if (pageStatus === "loading") {
     return <div className="respond-page-message">Loading…</div>;
   }
@@ -375,7 +480,7 @@ export default function RespondForm() {
     const isEnded = sessionInfo.status === "ended";
     return (
       <div className="respond-page">
-        <div className="respond-code-card">
+        <div className="respond-code-card" inert={blocked || undefined}>
           <button type="button" className="respond-exit-link" onClick={() => navigate("/")}>
             ← Leave
           </button>
@@ -426,6 +531,7 @@ export default function RespondForm() {
             </div>
           )}
         </div>
+        {blocked && <ConnectionOverlay />}
       </div>
     );
   }
@@ -480,9 +586,25 @@ export default function RespondForm() {
             <button
               type="button"
               className="respond-download-btn"
-              onClick={() => downloadAnswersAsText(result.formTitle, result.answers)}
+              disabled={downloadingPdf}
+              onClick={async () => {
+                setDownloadingPdf(true);
+                try {
+                  await downloadAnswersAsPdf({
+                    formTitle: result.formTitle,
+                    respondentName: name.trim(),
+                    sessionName: result.session?.name,
+                    submittedAt: new Date(),
+                    score: result.score,
+                    maxScore: result.maxScore,
+                    answers: result.answers,
+                  });
+                } finally {
+                  setDownloadingPdf(false);
+                }
+              }}
             >
-              <span>↓</span> Download my answers
+              <span>↓</span> {downloadingPdf ? "Preparing PDF…" : "Download my answers (PDF)"}
             </button>
           )}
 
@@ -516,16 +638,22 @@ export default function RespondForm() {
 
   return (
     <div className="respond-page">
-      <div className="respond-form-column">
+      <div className="respond-form-column" inert={blocked || refocusCountdown > 0 || needsFullscreenGate || undefined}>
         <div className="respond-toolbar">
           <button type="button" className="respond-exit-link" onClick={handleExit}>
             ← Leave
           </button>
-          {secondsLeft !== null && (
-            <span className={`respond-timer ${secondsLeft <= 60 ? "respond-timer-urgent" : ""}`}>
-              {formatClock(secondsLeft)}
-            </span>
-          )}
+          <div className="respond-toolbar-right">
+            <button type="button" className="respond-fullscreen-btn" onClick={handleToggleFullscreen}>
+              <span aria-hidden="true">⛶</span>
+              {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+            </button>
+            {secondsLeft !== null && (
+              <span className={`respond-timer ${secondsLeft <= 60 ? "respond-timer-urgent" : ""}`}>
+                {formatClock(secondsLeft)}
+              </span>
+            )}
+          </div>
         </div>
 
         {answerableQuestions.length === 0 ? (
@@ -544,6 +672,7 @@ export default function RespondForm() {
             submitting={submitStatus === "submitting"}
             formTitle={form.title}
             formDescription={form.description}
+            bannerImage={form.bannerImage}
             footerNotice={submitError ? <p className="respond-submit-error">{submitError}</p> : null}
           />
         )}
@@ -565,6 +694,10 @@ export default function RespondForm() {
           </div>
         </div>
       )}
+
+      {blocked && <ConnectionOverlay />}
+      {!blocked && refocusCountdown > 0 && <RefocusLockOverlay secondsLeft={refocusCountdown} />}
+      {needsFullscreenGate && <FullscreenGateOverlay onEnter={handleToggleFullscreen} />}
     </div>
   );
 }

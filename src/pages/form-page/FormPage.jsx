@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Outlet } from "react-router-dom";
 import Sidebar from "../../components/FormComponents/Sidebar/Sidebar";
+import EmptyState from "../../components/ui/EmptyState";
 import useFormStore, { useFormActions } from "../../../store/useFormStore";
 import { formsApi } from "../../features/forms/services/formsApi";
 import "./form-page.css";
@@ -38,16 +39,16 @@ export default function FormPage() {
   }, [formId]);
 
   if (status === "loading") {
-    return <div className="form-page-message">Loading form…</div>;
+    return <EmptyState className="form-page-message" description="Loading form…" />;
   }
 
   if (status === "error") {
-    return <div className="form-page-message form-page-message-error">{error}</div>;
+    return <EmptyState className="form-page-message form-page-message-error" description={error} />;
   }
 
   if (loadedFormId !== formId) {
     // Guards a render between the fetch resolving and the store finishing its update.
-    return <div className="form-page-message">Loading form…</div>;
+    return <EmptyState className="form-page-message" description="Loading form…" />;
   }
 
   return (

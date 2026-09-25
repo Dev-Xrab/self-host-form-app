@@ -1,6 +1,6 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { aggregateQuestion } from "./responseAnalytics";
+import { aggregateQuestion, formatPercent } from "./responseAnalytics";
 
 const MARGIN = 40;
 const BRAND = [55, 53, 47]; // #37352f, matches the app's Notion-inspired accent
@@ -76,14 +76,14 @@ function addQuestionSection(doc, question, responses, y) {
         return;
       }
       row.entries.forEach((e) => {
-        body.push([row.rowLabel, e.label, String(e.count), `${Math.round((e.count / row.total) * 100)}%`]);
+        body.push([row.rowLabel, e.label, String(e.count), formatPercent(e.count, row.total)]);
       });
     });
     if (body.length === 0) body = [["No rows configured", "", "", ""]];
   } else if (result.kind === "bar" || result.kind === "scale") {
     head = [["Option / Value", "Count", "%"]];
     body = result.entries.length
-      ? result.entries.map((e) => [e.label, String(e.count), result.total ? `${Math.round((e.count / result.total) * 100)}%` : "0%"])
+      ? result.entries.map((e) => [e.label, String(e.count), formatPercent(e.count, result.total)])
       : [["No answers yet", "", ""]];
     if (result.kind === "scale" && result.stats) {
       body.push([

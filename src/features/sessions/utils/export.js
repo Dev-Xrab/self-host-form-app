@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
+import { safeExtensionForDataUri } from "../../../lib/fileTypes";
 
 const sanitizeSheetName = (name) => name.replace(/[:\\/?*[\]]/g, "").trim().slice(0, 31) || "Sheet";
 const slug = (name) => (name || "").trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") || "x";
@@ -23,9 +24,9 @@ function uniqueSheetName(base, usedNames) {
   return candidate;
 }
 
+// Allowlisted extension only — see src/lib/fileTypes.js.
 function fileExtensionFromDataUri(dataUri) {
-  const mime = /^data:([^;]+);base64,/.exec(dataUri || "")?.[1] || "";
-  return mime.split("/")[1]?.split("+")[0] || "bin";
+  return safeExtensionForDataUri(dataUri);
 }
 
 function dataUriToBytes(dataUri) {
@@ -70,7 +71,7 @@ function autoSizeColumns(sheet, grid, { min = 10, max = 48 } = {}) {
   });
 }
 
-// Exported for reuse by any other client-side XLSX export in the app (see GradebookPage.jsx) —
+// Exported for reuse by any other client-side XLSX export in the app —
 // one shared "professional format" look (dark header, banded rows, sized columns) instead of
 // each export screen reinventing its own styling. `infoLines` (form title / subject / export
 // date / response count, etc.) renders as a small bold block above the header row instead of
@@ -176,7 +177,10 @@ export function triggerDownload(blob, filename) {
 // respondent). When any answer includes an uploaded file, the workbook is bundled into a .zip
 // together with those files (under files/<session>/...) instead of downloading a bare .xlsx,
 // since the file itself — not just a "File attached" label — needs to actually be handed over.
-export async function exportSessionsToWorkbook(sessionExports) {
+// `matrix` (optional, { sessions, rows } from features/sessions/utils/respondentMatrix.js) adds a
+// leading "Responses" sheet mirroring the Bulk Export table: one row per respondent, one column per
+// session, saying whether they responded (and their score, when the session was graded).
+export async function exportSessionsToWorkbook(sessionExports, { matrix } = {}) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Self Host Form";
   wb.created = new Date();
@@ -219,6 +223,30 @@ export async function exportSessionsToWorkbook(sessionExports) {
     `Respondents: ${summaryRows.length}`,
     `Exported: ${new Date().toLocaleString()}`,
   ];
+
+  if (matrix && matrix.rows.length > 0) {
+    const matrixHeader = ["Respondent", "Student ID", "Roster Status", ...matrix.sessions.map((s) => s.name || s.formTitle)];
+    const matrixRows = matrix.rows.map((row) => [
+      row.name,
+      row.studentId || "",
+      row.matched ? "Roster" : "Not on roster",
+      ...matrix.sessions.map((s) => {
+        const response = row.cells[s.id];
+        if (!response) return "No response";
+        return response.score != null && response.maxScore != null
+          ? `Responded (${response.score}/${response.maxScore})`
+          : "Responded";
+      }),
+    ]);
+    addGridSheet(wb, uniqueSheetName("Responses", usedSheetNames), [matrixHeader, ...matrixRows], {
+      infoLines: [
+        "Responses by respondent",
+        `Sessions: ${matrix.sessions.length}`,
+        `Respondents: ${matrix.rows.length}`,
+        `Exported: ${new Date().toLocaleString()}`,
+      ],
+    });
+  }
 
   addGridSheet(wb, uniqueSheetName("Results", usedSheetNames), [summaryHeader, ...summaryRows], { infoLines });
 

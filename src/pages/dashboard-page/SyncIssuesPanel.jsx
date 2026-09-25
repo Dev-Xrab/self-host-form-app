@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useSyncIssues } from "../../features/cloud/hooks/useSyncIssues";
 import Dialog from "../../components/Dialog/Dialog";
+import EmptyState from "../../components/ui/EmptyState";
 
 function timeAgo(iso) {
   if (!iso) return "";
@@ -29,9 +30,9 @@ export default function SyncIssuesPanel({ onClose }) {
         {error && <p className="dash-form-error">{error}</p>}
 
         {loading ? (
-          <p className="dash-empty">Loading…</p>
+          <EmptyState description="Loading…" />
         ) : issues.length === 0 ? (
-          <p className="dash-empty">Nothing needs attention right now.</p>
+          <EmptyState description="Nothing needs attention right now." />
         ) : (
           <div className="dash-sync-issues-list">
             {issues.map((issue) => (

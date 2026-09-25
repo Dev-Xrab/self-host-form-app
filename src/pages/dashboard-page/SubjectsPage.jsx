@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { useSubjects } from "../../features/subjects/hooks/useSubjects";
 import { subjectsApi } from "../../features/subjects/services/subjectsApi";
 import { Icons } from "./icons";
-import { Monogram, initial } from "./Monogram";
+import FolderCard from "./FolderCard";
 import PageHeader from "./PageHeader";
 import Dialog from "../../components/Dialog/Dialog";
+import EmptyState from "../../components/ui/EmptyState";
 import DeleteSubjectModal from "./DeleteSubjectModal";
 
 const emptyForm = { name: "", code: "" };
@@ -18,6 +18,14 @@ export default function SubjectsPage() {
   const [form, setForm] = useState(emptyForm);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
+
+  // The same form drives both "New Folder" (renameTarget null) and "Rename" (renameTarget set) —
+  // one dialog, one set of fields, so renaming doesn't need its own separate implementation.
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const filtered = subjects.filter((s) => s.name.toLowerCase().includes(query.toLowerCase()));
 
@@ -41,12 +49,27 @@ export default function SubjectsPage() {
     }
   };
 
-  const [deleteTarget, setDeleteTarget] = useState(null);
+  const openRename = (folder) => {
+    setForm({ name: folder.name, code: folder.code || "" });
+    setSaveError(null);
+    setRenameTarget(folder);
+  };
 
-  const handleDeleteClick = (e, subject) => {
+  const handleRenameSubmit = async (e) => {
     e.preventDefault();
-    e.stopPropagation();
-    setDeleteTarget(subject);
+    if (!form.name.trim() || saving) return;
+
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await subjectsApi.update(renameTarget.id, { name: form.name.trim(), code: form.code.trim() });
+      setRenameTarget(null);
+      refresh();
+    } catch (err) {
+      setSaveError(err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDeleteConfirm = async (formsAction) => {
@@ -59,12 +82,12 @@ export default function SubjectsPage() {
     <>
       <PageHeader
         eyebrow="Admin"
-        title="Subjects"
-        subtitle="Organize forms by subject."
+        title="Folders"
+        subtitle="Organize your forms into folders, the same way you'd sort files."
         action={
           <button type="button" className="dash-primary-btn" onClick={() => setShowModal(true)}>
             <Icons.plus />
-            Add Subject
+            New Folder
           </button>
         }
       />
@@ -74,55 +97,32 @@ export default function SubjectsPage() {
           <Icons.search className="dash-search-icon" />
           <input
             type="text"
-            placeholder="Search subjects..."
+            placeholder="Search folders..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
 
         {loading ? (
-          <p className="dash-empty">Loading subjects…</p>
+          <EmptyState description="Loading folders…" />
         ) : error ? (
-          <p className="dash-empty">Couldn't load subjects — {error}</p>
+          <EmptyState description={`Couldn't load folders — ${error}`} />
         ) : filtered.length === 0 ? (
-          <p className="dash-empty">No subjects found.</p>
+          <EmptyState description={`No folders match "${query}".`} />
         ) : (
-          <div className="dash-card-grid">
+          <div className="folder-grid">
             {filtered.map((subject) => (
-              <Link
-                className="dash-item-card dash-item-card-link dash-item-card-removable"
-                key={subject.id}
-                to={`/dashboard/subjects/${subject.id}`}
-              >
-                {!subject.isDefault && (
-                  <button
-                    type="button"
-                    className="dash-item-card-remove"
-                    title="Delete subject"
-                    onClick={(e) => handleDeleteClick(e, subject)}
-                  >
-                    <Icons.close />
-                  </button>
-                )}
-                <Monogram label={initial(subject.name)} />
-                <span className="dash-item-title">
-                  {subject.name}
-                  {subject.isDefault && <span className="dash-item-badge">Default</span>}
-                </span>
-                {subject.code && <span className="dash-item-subtitle">{subject.code}</span>}
-                <span className="dash-item-divider" />
-                <span className="dash-item-meta">Form Count: {subject.formCount}</span>
-              </Link>
+              <FolderCard key={subject.id} folder={subject} onRename={openRename} onDelete={setDeleteTarget} />
             ))}
           </div>
         )}
       </div>
 
       {showModal && (
-        <Dialog title="Add Subject" onClose={() => setShowModal(false)}>
+        <Dialog title="New Folder" onClose={() => setShowModal(false)}>
           <form className="dash-form" onSubmit={handleSubmit}>
             <label className="dash-form-field">
-              <span className="dash-form-label">Subject name</span>
+              <span className="dash-form-label">Folder name</span>
               <input
                 type="text"
                 className="dash-form-input"
@@ -134,7 +134,7 @@ export default function SubjectsPage() {
             </label>
 
             <label className="dash-form-field">
-              <span className="dash-form-label">Subject code</span>
+              <span className="dash-form-label">Folder code (optional)</span>
               <input
                 type="text"
                 className="dash-form-input"
@@ -151,7 +151,40 @@ export default function SubjectsPage() {
                 Cancel
               </button>
               <button type="submit" className="dash-primary-btn" disabled={creating}>
-                {creating ? "Creating…" : "Create Subject"}
+                {creating ? "Creating…" : "Create Folder"}
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      )}
+
+      {renameTarget && (
+        <Dialog title="Rename Folder" onClose={() => setRenameTarget(null)}>
+          <form className="dash-form" onSubmit={handleRenameSubmit}>
+            <label className="dash-form-field">
+              <span className="dash-form-label">Folder name</span>
+              <input
+                type="text"
+                className="dash-form-input"
+                value={form.name}
+                onChange={handleField("name")}
+                autoFocus
+              />
+            </label>
+
+            <label className="dash-form-field">
+              <span className="dash-form-label">Folder code (optional)</span>
+              <input type="text" className="dash-form-input" value={form.code} onChange={handleField("code")} />
+            </label>
+
+            {saveError && <p className="dash-form-error">{saveError}</p>}
+
+            <div className="dash-modal-footer">
+              <button type="button" className="dash-ghost-btn" onClick={() => setRenameTarget(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="dash-primary-btn" disabled={saving}>
+                {saving ? "Saving…" : "Save Changes"}
               </button>
             </div>
           </form>

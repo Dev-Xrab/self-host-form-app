@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useForms } from "../../features/forms/hooks/useForms";
 import { formsApi } from "../../features/forms/services/formsApi";
 import { downloadFormAsJson } from "../../features/forms/utils/exportForm";
@@ -9,12 +9,15 @@ import SubjectSelect from "../../features/subjects/components/SubjectSelect";
 import { useCloudAccount } from "../../features/cloud/hooks/useCloudAccount";
 import { cloudApi } from "../../features/cloud/services/cloudApi";
 import { Icons } from "./icons";
-import { Monogram } from "./Monogram";
 import PageHeader from "./PageHeader";
 import Dialog from "../../components/Dialog/Dialog";
+import EmptyState from "../../components/ui/EmptyState";
 import ConfirmDialog from "../../components/Dialog/ConfirmDialog";
 import GoogleSyncDialog from "../../features/cloud/components/GoogleSyncDialog";
 import GoogleAuthRequiredDialog from "../../features/cloud/components/GoogleAuthRequiredDialog";
+import FormCard from "./FormCard";
+import TemplateGallery from "./TemplateGallery";
+import SaveResponsesPrompt from "../../features/cloud/components/SaveResponsesPrompt";
 import { describeCloudError } from "../../features/cloud/utils/describeCloudError";
 
 const emptyForm = { name: "", description: "", subjectId: "" };
@@ -34,6 +37,8 @@ export default function FormsPage() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState(null);
   const [exportingId, setExportingId] = useState(null);
+  const [exportChoiceTarget, setExportChoiceTarget] = useState(null); // form | null
+  const [exportError, setExportError] = useState(null);
   const fileInputRef = useRef(null);
 
   const { connected: cloudConnected, login: cloudLogin } = useCloudAccount();
@@ -44,20 +49,20 @@ export default function FormsPage() {
   const [pendingCloudAction, setPendingCloudAction] = useState(null);
   const [cloudLoginError, setCloudLoginError] = useState(null);
   const [showCloudModal, setShowCloudModal] = useState(false);
+  const [cloudQuery, setCloudQuery] = useState("");
   const [cloudForms, setCloudForms] = useState([]);
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudError, setCloudError] = useState(null);
   const [cloudImportingId, setCloudImportingId] = useState(null);
-  const [cloudVersionsById, setCloudVersionsById] = useState({});
-  const [selectedVersionById, setSelectedVersionById] = useState({});
   const [deleteCloudTarget, setDeleteCloudTarget] = useState(null);
-  // { remoteForm, version } | null — a picked version that differs from what's already imported
-  // on this device, pending the host's confirmation before it overwrites the local copy.
+  // The cloud form whose latest version would overwrite local edits that were never saved to the
+  // cloud — pending the host's confirmation.
   const [updateCloudTarget, setUpdateCloudTarget] = useState(null);
   const [publishingId, setPublishingId] = useState(null);
   const [publishError, setPublishError] = useState(null);
 
   const [showGoogleFormsModal, setShowGoogleFormsModal] = useState(false);
+  const [googleQuery, setGoogleQuery] = useState("");
   const [googleForms, setGoogleForms] = useState([]);
   const [googleFormsLoading, setGoogleFormsLoading] = useState(false);
   const [googleFormsError, setGoogleFormsError] = useState(null);
@@ -113,6 +118,7 @@ export default function FormsPage() {
 
   const openGoogleFormsModal = async () => {
     setShowGoogleFormsModal(true);
+    setGoogleQuery("");
     setGoogleImportResult(null);
     setGoogleFormsLoading(true);
     setGoogleFormsError(null);
@@ -130,7 +136,7 @@ export default function FormsPage() {
     setGoogleFormsError(null);
     try {
       const created = await cloudApi.importGoogleForm(gform.id);
-      if (created.skipped?.length || created.importedResponseCount || created.responseImportError) {
+      if (created.skipped?.length || created.importedResponseCount || created.unsavedCount || created.responseImportError) {
         setGoogleImportResult(created);
       } else {
         setShowGoogleFormsModal(false);
@@ -145,9 +151,7 @@ export default function FormsPage() {
 
   // Checks for structural changes first (read-only) — only shows the sync decision dialog when
   // something actually changed; otherwise goes straight to a response-only sync, same as before.
-  const handleGoogleRefresh = async (e, target) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleGoogleRefresh = async (target) => {
     setRefreshingId(target.id);
     setRefreshError(null);
     try {
@@ -156,7 +160,7 @@ export default function FormsPage() {
         setChangeDiffTarget({ form: target, diff });
       } else {
         const result = await cloudApi.applyGoogleFormChanges(target.id, "keep-local");
-        setRefreshResult({ formTitle: target.title, ...result });
+        setRefreshResult({ formTitle: target.title, formId: target.id, ...result });
         refreshForms();
       }
     } catch (err) {
@@ -171,7 +175,7 @@ export default function FormsPage() {
     setRefreshError(null);
     try {
       const result = await cloudApi.applyGoogleFormChanges(changeDiffTarget.form.id, decision);
-      setRefreshResult({ formTitle: changeDiffTarget.form.title, ...result });
+      setRefreshResult({ formTitle: changeDiffTarget.form.title, formId: changeDiffTarget.form.id, ...result });
       setChangeDiffTarget(null);
       refreshForms();
     } catch (err) {
@@ -183,18 +187,11 @@ export default function FormsPage() {
 
   const openCloudModal = async () => {
     setShowCloudModal(true);
+    setCloudQuery("");
     setCloudLoading(true);
     setCloudError(null);
     try {
-      const list = await cloudApi.listForms();
-      setCloudForms(list);
-      // Fetched upfront for every listed form rather than lazily per-dropdown-open — the typical
-      // account has few enough cloud forms that this is one small batch of extra calls, not a
-      // real N+1 concern, and it means the version dropdown is never itself a loading state.
-      const versionEntries = await Promise.all(
-        list.map(async (rf) => [rf.id, await cloudApi.listCloudFormVersions(rf.id).catch(() => [])])
-      );
-      setCloudVersionsById(Object.fromEntries(versionEntries));
+      setCloudForms(await cloudApi.listForms());
     } catch (err) {
       setCloudError(err.message);
     } finally {
@@ -202,11 +199,11 @@ export default function FormsPage() {
     }
   };
 
-  const handleCloudImport = async (remoteForm, version) => {
+  const handleCloudImport = async (remoteForm) => {
     setCloudImportingId(remoteForm.id);
     setCloudError(null);
     try {
-      const created = await cloudApi.importForm(remoteForm.id, version);
+      const created = await cloudApi.importForm(remoteForm.id);
       setShowCloudModal(false);
       navigate(`/forms/${created.id}`);
     } catch (err) {
@@ -221,11 +218,46 @@ export default function FormsPage() {
   // Stays on the Forms page afterward (unlike a fresh import) since this is updating a form the
   // host was already managing, not introducing a new one worth jumping to.
   const handleCloudUpdate = async () => {
-    const { remoteForm, version } = updateCloudTarget;
-    await cloudApi.importForm(remoteForm.id, version);
+    await cloudApi.importForm(updateCloudTarget.id, { overwrite: true });
     setUpdateCloudTarget(null);
     setShowCloudModal(false);
     refreshForms();
+  };
+
+  // Brings this device's copy up to the cloud's latest. With unsaved local edits it asks first
+  // (see handleCloudUpdate); otherwise it just updates and stays on the Forms page.
+  const handleCloudPull = async (remoteForm, linkedForm) => {
+    if (linkedForm.hasUnsavedCloudChanges) {
+      setUpdateCloudTarget(remoteForm);
+      return;
+    }
+    setCloudImportingId(remoteForm.id);
+    setCloudError(null);
+    try {
+      await cloudApi.importForm(remoteForm.id);
+      setShowCloudModal(false);
+      refreshForms();
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setCloudImportingId(null);
+    }
+  };
+
+  // Saves local edits to a form already on the cloud, then refreshes so the cloud list and the
+  // card badges reflect it.
+  const handleCloudSave = async (remoteForm, linkedForm) => {
+    setCloudImportingId(remoteForm.id);
+    setCloudError(null);
+    try {
+      await cloudApi.publishForm(linkedForm.id);
+      const [list] = await Promise.all([cloudApi.listForms(), refreshForms()]);
+      setCloudForms(list);
+    } catch (err) {
+      setCloudError(err.message);
+    } finally {
+      setCloudImportingId(null);
+    }
   };
 
   // Deliberately doesn't catch its own errors — ConfirmDialog already surfaces a thrown onConfirm
@@ -237,9 +269,7 @@ export default function FormsPage() {
     setDeleteCloudTarget(null);
   };
 
-  const handlePublish = async (e, target) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handlePublish = async (target) => {
     setPublishingId(target.id);
     setPublishError(null);
     try {
@@ -250,6 +280,15 @@ export default function FormsPage() {
     } finally {
       setPublishingId(null);
     }
+  };
+
+  // The host's answer to "save the fetched Google responses to the cloud too?". Throws on failure
+  // so SaveResponsesPrompt can show it; on success the prompt disappears (count -> 0).
+  const handleSaveResponsesToCloud = async (formId) => {
+    await cloudApi.saveGoogleResponsesToCloud(formId);
+    setRefreshResult((prev) => (prev?.formId === formId ? { ...prev, unsavedCount: 0 } : prev));
+    setGoogleImportResult((prev) => (prev?.id === formId ? { ...prev, unsavedCount: 0 } : prev));
+    refreshForms();
   };
 
   const filtered = forms.filter((f) => f.title.toLowerCase().includes(query.toLowerCase()));
@@ -292,15 +331,36 @@ export default function FormsPage() {
     }
   };
 
-  const handleExport = async (e, target) => {
-    e.preventDefault();
-    e.stopPropagation();
+  // Reuses the exact same server path a JSON-file import already goes through (POST
+  // /api/forms/import) — a template is just a canned {title, description, questions} payload, so
+  // there's no separate "create from template" endpoint to keep in sync with that one.
+  const handleCreateFromTemplate = async (template) => {
+    const created = await formsApi.import({
+      title: template.title,
+      description: template.description || "",
+      settings: {},
+      questions: template.questions,
+      subjectId: defaultSubjectId || null,
+    });
+    navigate(`/forms/${created.id}`);
+  };
+
+  // The card's export button only opens the choice (setExportChoiceTarget) — whether the file
+  // carries the form's responses is asked every time, since a shareable template and a full backup
+  // are both normal uses of this export.
+  const runExport = async (includeResponses) => {
+    const target = exportChoiceTarget;
+    setExportChoiceTarget(null);
     setExportingId(target.id);
+    setExportError(null);
     try {
-      const full = await formsApi.get(target.id);
-      downloadFormAsJson(full);
-    } catch {
-      // best-effort — the card stays interactive either way
+      const [full, responses] = await Promise.all([
+        formsApi.get(target.id),
+        includeResponses ? formsApi.responses(target.id) : Promise.resolve(undefined),
+      ]);
+      downloadFormAsJson(full, { responses });
+    } catch (err) {
+      setExportError(err.message);
     } finally {
       setExportingId(null);
     }
@@ -374,9 +434,12 @@ export default function FormsPage() {
       />
 
       <div className="dash-content">
+        <TemplateGallery onBlank={() => setShowModal(true)} onPick={handleCreateFromTemplate} />
+
         {importError && <p className="dash-form-error">{importError}</p>}
         {cloudLoginError && <p className="dash-form-error">{cloudLoginError}</p>}
         {publishError && <p className="dash-form-error">{publishError}</p>}
+        {exportError && <p className="dash-form-error">{exportError}</p>}
         {refreshError && <p className="dash-form-error">{refreshError}</p>}
         {refreshResult && (
           <p className={`dash-settings-note ${refreshResult.responseImportError ? "dash-settings-note-warn" : "dash-settings-note-success"}`}>
@@ -398,6 +461,13 @@ export default function FormsPage() {
             </button>
           </p>
         )}
+        {refreshResult?.unsavedCount > 0 && (
+          <SaveResponsesPrompt
+            count={refreshResult.unsavedCount}
+            onSave={() => handleSaveResponsesToCloud(refreshResult.formId)}
+            onDismiss={() => setRefreshResult((prev) => ({ ...prev, unsavedCount: 0 }))}
+          />
+        )}
 
         <div className="dash-search dash-page-search">
           <Icons.search className="dash-search-icon" />
@@ -410,11 +480,11 @@ export default function FormsPage() {
         </div>
 
         {loading ? (
-          <p className="dash-empty">Loading forms…</p>
+          <EmptyState description="Loading forms…" />
         ) : error ? (
-          <p className="dash-empty">Couldn't load forms — {error}</p>
+          <EmptyState description={`Couldn't load forms — ${error}`} />
         ) : filtered.length === 0 ? (
-          <p className="dash-empty">No forms found.</p>
+          <EmptyState description="No forms found." />
         ) : (
           groups.map((group) => (
             <section className="dash-section" key={group.subject?.id || "unsorted"}>
@@ -425,84 +495,45 @@ export default function FormsPage() {
                 </span>
               </div>
 
-              <div className="dash-card-grid">
+              <div className="form-grid">
                 {group.items.map((f) => (
-                  <Link
-                    className="dash-item-card dash-item-card-link dash-item-card-removable"
+                  <FormCard
                     key={f.id}
-                    to={`/forms/${f.id}`}
-                  >
-                    <div className="dash-item-card-head">
-                      <Monogram label={<Icons.fileText />} />
-                      <div className="dash-item-card-actions">
-                        <button
-                          type="button"
-                          className="dash-item-card-action"
-                          title="Export form"
-                          disabled={exportingId === f.id}
-                          onClick={(e) => handleExport(e, f)}
-                        >
-                          <Icons.download />
-                        </button>
-                        {cloudConnected && (
-                          <button
-                            type="button"
-                            className="dash-item-card-action"
-                            title={f.remoteFormId ? "Publish new version to your cloud account" : "Publish to your cloud account"}
-                            disabled={publishingId === f.id}
-                            onClick={(e) => handlePublish(e, f)}
-                          >
-                            <Icons.cloud />
-                          </button>
-                        )}
-                        {cloudConnected && f.googleFormId && (
-                          <button
-                            type="button"
-                            className="dash-item-card-action"
-                            title="Pull in new questions/responses from Google Forms"
-                            disabled={refreshingId === f.id}
-                            onClick={(e) => handleGoogleRefresh(e, f)}
-                          >
-                            <Icons.refresh />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="dash-item-card-action dash-item-card-action-danger"
-                          title="Delete form"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setDeleteFormTarget(f);
-                          }}
-                        >
-                          <Icons.close />
-                        </button>
-                      </div>
-                    </div>
-                    <span className="dash-item-title">{f.title || "Untitled form"}</span>
-                    {f.googleFormId ? (
-                      <span className="dash-item-badge" title="Imported from Google Forms">
-                        Google Forms
-                      </span>
-                    ) : (
-                      f.remoteFormId && (
-                        <span className="dash-item-badge" title={`Synced with Google (v${f.remoteVersion})`}>
-                          Cloud
-                        </span>
-                      )
-                    )}
-                    <span className="dash-item-divider" />
-                    <span className="dash-item-meta">
-                      {f.questionCount} question{f.questionCount === 1 ? "" : "s"}
-                    </span>
-                  </Link>
+                    form={f}
+                    cloudConnected={cloudConnected}
+                    exporting={exportingId === f.id}
+                    publishing={publishingId === f.id}
+                    refreshing={refreshingId === f.id}
+                    onExport={setExportChoiceTarget}
+                    onPublish={handlePublish}
+                    onRefreshGoogle={handleGoogleRefresh}
+                    onDelete={(form) => setDeleteFormTarget(form)}
+                  />
                 ))}
               </div>
             </section>
           ))
         )}
       </div>
+
+      {exportChoiceTarget && (
+        <Dialog title="Export form" onClose={() => setExportChoiceTarget(null)}>
+          <div className="dash-form">
+            <p className="dash-form-label">
+              Include the responses collected for "{exportChoiceTarget.title || "Untitled form"}" in the file? Importing
+              it later will bring them back along with the form.
+            </p>
+            <div className="dash-modal-footer">
+              <button type="button" className="dash-ghost-btn" onClick={() => runExport(false)}>
+                Form only
+              </button>
+              <button type="button" className="dash-primary-btn" onClick={() => runExport(true)}>
+                Include responses
+              </button>
+            </div>
+          </div>
+        </Dialog>
+      )}
 
       {showModal && (
         <Dialog title="Add Form" onClose={() => setShowModal(false)}>
@@ -531,7 +562,7 @@ export default function FormsPage() {
             </label>
 
             <label className="dash-form-field">
-              <span className="dash-form-label">Subject</span>
+              <span className="dash-form-label">Folder</span>
               <SubjectSelect
                 className="dash-form-input"
                 subjects={subjects}
@@ -565,107 +596,112 @@ export default function FormsPage() {
       )}
 
       {showCloudModal && (
-        <Dialog title="Import from Cloud" onClose={() => setShowCloudModal(false)}>
-          <div className="dash-form">
+        <Dialog title="Import from Cloud" className="import-dialog" onClose={() => setShowCloudModal(false)}>
+          <div className="import-picker">
             {cloudError && <p className="dash-form-error">{cloudError}</p>}
 
+            {!cloudLoading && cloudForms.length > 0 && (
+              <div className="import-search">
+                <Icons.search />
+                <input
+                  type="text"
+                  placeholder="Search your cloud forms..."
+                  value={cloudQuery}
+                  onChange={(e) => setCloudQuery(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            )}
+
             {cloudLoading ? (
-              <p className="dash-empty">Loading your forms…</p>
+              <EmptyState description="Loading your forms…" />
             ) : cloudForms.length === 0 ? (
-              <p className="dash-empty">
-                No forms published to your account yet. Publish a form from this device first (the cloud icon on
-                a form card), or publish one from another device signed in to the same account.
-              </p>
+              <EmptyState description="No forms published to your account yet. Publish a form from this device first (the cloud icon on a form card), or publish one from another device signed in to the same account." />
             ) : (
-              <div className="dash-card-grid">
-                {cloudForms.map((rf) => {
-                  const versions = cloudVersionsById[rf.id] || [];
-                  // Already on this device — see importCentralFormLocally's remote_form_id dedup
-                  // guard (server/cloud/routes.js). Defaults the picker to the version already
-                  // imported (not "latest") so the default action reads as "Open", not "Update" —
-                  // picking a different version is what turns it into one.
-                  const linkedForm = forms.find((f) => f.remoteFormId === rf.id);
-                  const selectedVersion =
-                    selectedVersionById[rf.id] ?? linkedForm?.remoteVersion ?? rf.version;
-                  const isCurrent = linkedForm && linkedForm.remoteVersion === selectedVersion;
-                  return (
-                    <div className="dash-item-card dash-item-card-removable" key={rf.id}>
-                      <button
-                        type="button"
-                        className="dash-item-card-remove"
-                        title="Delete from cloud account"
-                        onClick={() => setDeleteCloudTarget(rf)}
-                      >
-                        <Icons.close />
-                      </button>
-                      <Monogram label={<Icons.fileText />} />
-                      <span className="dash-item-title">{rf.title || "Untitled form"}</span>
-                      {linkedForm && (
-                        <span className="dash-item-badge" title={`This device has v${linkedForm.remoteVersion}`}>
-                          {isCurrent ? "Already imported" : `You have v${linkedForm.remoteVersion}`}
+              <div className="import-list">
+                {cloudForms
+                  .filter((rf) => (rf.title || "Untitled form").toLowerCase().includes(cloudQuery.toLowerCase()))
+                  .map((rf) => {
+                    // Already on this device — see importCentralFormLocally's remote_form_id dedup
+                    // guard (server/cloud/routes.js). There is no version choice: the cloud copy is
+                    // always its latest, and the action here is whichever brings the two in step.
+                    const linkedForm = forms.find((f) => f.remoteFormId === rf.id);
+                    const behind = linkedForm && rf.version > linkedForm.remoteVersion;
+                    const dirty = linkedForm?.hasUnsavedCloudChanges;
+                    const busy = cloudImportingId === rf.id;
+                    const status = behind ? "Cloud has a newer version" : dirty ? "Unsaved changes" : linkedForm ? "Up to date" : null;
+                    return (
+                      <div className="import-row" key={rf.id}>
+                        <span className="import-row-icon">
+                          <Icons.fileText />
                         </span>
-                      )}
-                      <span className="dash-item-divider" />
-                      <span className="dash-item-meta">
-                        {rf.questionCount} question{rf.questionCount === 1 ? "" : "s"}
-                      </span>
-                      {versions.length > 1 ? (
-                        <label className="dash-form-field" style={{ marginTop: 8 }}>
-                          <span className="dash-form-label">Version</span>
-                          <select
-                            className="dash-form-input"
-                            value={selectedVersion}
-                            onChange={(e) =>
-                              setSelectedVersionById((prev) => ({ ...prev, [rf.id]: Number(e.target.value) }))
-                            }
-                          >
-                            {versions.map((v) => (
-                              <option key={v.version} value={v.version}>
-                                v{v.version}
-                                {v.version === rf.version ? " (latest)" : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : (
-                        <span className="dash-item-meta">v{rf.version}</span>
-                      )}
-                      <div className="dash-modal-footer">
-                        {isCurrent ? (
+                        <span className="import-row-text">
+                          <span className="import-row-title">{rf.title || "Untitled form"}</span>
+                          <span className="import-row-meta">
+                            {rf.questionCount} question{rf.questionCount === 1 ? "" : "s"}
+                            {status && (
+                              <span className={`import-row-status ${dirty || behind ? "is-attention" : "is-ok"}`}>
+                                {status}
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                        <span className="import-row-actions">
+                          {!linkedForm ? (
+                            <button
+                              type="button"
+                              className="dash-primary-btn"
+                              disabled={busy}
+                              onClick={() => handleCloudImport(rf)}
+                            >
+                              {busy ? "Importing…" : "Import"}
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className="dash-ghost-btn"
+                                onClick={() => {
+                                  setShowCloudModal(false);
+                                  navigate(`/forms/${linkedForm.id}`);
+                                }}
+                              >
+                                Open
+                              </button>
+                              {behind ? (
+                                <button
+                                  type="button"
+                                  className="dash-primary-btn"
+                                  disabled={busy}
+                                  onClick={() => handleCloudPull(rf, linkedForm)}
+                                >
+                                  {busy ? "Updating…" : "Update"}
+                                </button>
+                              ) : dirty ? (
+                                <button
+                                  type="button"
+                                  className="dash-primary-btn"
+                                  disabled={busy}
+                                  onClick={() => handleCloudSave(rf, linkedForm)}
+                                >
+                                  {busy ? "Saving…" : "Save"}
+                                </button>
+                              ) : null}
+                            </>
+                          )}
                           <button
                             type="button"
-                            className="dash-ghost-btn"
-                            onClick={() => {
-                              setShowCloudModal(false);
-                              navigate(`/forms/${linkedForm.id}`);
-                            }}
+                            className="import-row-delete"
+                            title="Delete from cloud account"
+                            aria-label="Delete from cloud account"
+                            onClick={() => setDeleteCloudTarget(rf)}
                           >
-                            Open
+                            <Icons.trash />
                           </button>
-                        ) : linkedForm ? (
-                          <button
-                            type="button"
-                            className="dash-primary-btn"
-                            onClick={() => setUpdateCloudTarget({ remoteForm: rf, version: selectedVersion })}
-                          >
-                            {selectedVersion > linkedForm.remoteVersion
-                              ? `Update to v${selectedVersion}`
-                              : `Revert to v${selectedVersion}`}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="dash-primary-btn"
-                            disabled={cloudImportingId === rf.id}
-                            onClick={() => handleCloudImport(rf, selectedVersionById[rf.id])}
-                          >
-                            {cloudImportingId === rf.id ? "Importing…" : "Import"}
-                          </button>
-                        )}
+                        </span>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
               </div>
             )}
           </div>
@@ -685,7 +721,7 @@ export default function FormsPage() {
       {updateCloudTarget && (
         <ConfirmDialog
           title="Update form from cloud"
-          message={`Replace this device's copy of "${updateCloudTarget.remoteForm.title || "Untitled form"}" with cloud v${updateCloudTarget.version}? Any local changes made since it was last imported or published will be overwritten. Responses already collected are kept either way, but one answered under a question this version doesn't have anymore won't be shown.`}
+          message={`"${updateCloudTarget.title || "Untitled form"}" has changes on this device that aren't saved to the cloud. Updating replaces this device's copy with the cloud's latest and discards those changes. Responses already collected are kept, but one answered under a question the cloud copy no longer has won't be shown.`}
           confirmLabel="Update"
           busyLabel="Updating…"
           onCancel={() => setUpdateCloudTarget(null)}
@@ -694,8 +730,8 @@ export default function FormsPage() {
       )}
 
       {showGoogleFormsModal && (
-        <Dialog title="Import Google Form" onClose={() => setShowGoogleFormsModal(false)}>
-          <div className="dash-form">
+        <Dialog title="Import Google Form" className="import-dialog" onClose={() => setShowGoogleFormsModal(false)}>
+          <div className="import-picker">
             {googleFormsError && <p className="dash-form-error">{googleFormsError}</p>}
 
             {googleImportResult ? (
@@ -719,6 +755,12 @@ export default function FormsPage() {
                     ))}
                   </ul>
                 )}
+                {googleImportResult.unsavedCount > 0 && (
+                  <SaveResponsesPrompt
+                    count={googleImportResult.unsavedCount}
+                    onSave={() => handleSaveResponsesToCloud(googleImportResult.id)}
+                  />
+                )}
                 <div className="dash-modal-footer">
                   <button
                     type="button"
@@ -733,57 +775,70 @@ export default function FormsPage() {
                 </div>
               </>
             ) : googleFormsLoading ? (
-              <p className="dash-empty">Loading your Google Forms…</p>
+              <EmptyState description="Loading your Google Forms…" />
             ) : googleForms.length === 0 ? (
-              <p className="dash-empty">No forms found in your Google account.</p>
+              <EmptyState description="No forms found in your Google account." />
             ) : (
-              <div className="dash-card-grid">
-                {googleForms.map((gf) => {
-                  // Already linked to a form on THIS device — importing again would just be a
-                  // round trip to confirm what we already know locally (the cloud server itself
-                  // now also dedups by google_form_id, but there's no reason to make the request
-                  // at all when the answer is sitting right here in `forms`).
-                  const linkedForm = forms.find((f) => f.googleFormId === gf.id);
-                  return (
-                    <div className="dash-item-card" key={gf.id}>
-                      <Monogram label={<Icons.fileText />} />
-                      <span className="dash-item-title">{gf.name || "Untitled form"}</span>
-                      {linkedForm && (
-                        <span className="dash-item-badge" title="Already imported on this device">
-                          Already imported
-                        </span>
-                      )}
-                      <span className="dash-item-divider" />
-                      <span className="dash-item-meta">
-                        Edited {new Date(gf.modifiedTime).toLocaleDateString()}
-                      </span>
-                      <div className="dash-modal-footer">
-                        {linkedForm ? (
-                          <button
-                            type="button"
-                            className="dash-ghost-btn"
-                            onClick={() => {
-                              setShowGoogleFormsModal(false);
-                              navigate(`/forms/${linkedForm.id}`);
-                            }}
-                          >
-                            Open
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="dash-primary-btn"
-                            disabled={googleImportingId === gf.id}
-                            onClick={() => handleGoogleFormImport(gf)}
-                          >
-                            {googleImportingId === gf.id ? "Importing…" : "Import"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <>
+                <div className="import-search">
+                  <Icons.search />
+                  <input
+                    type="text"
+                    placeholder="Search your Google Forms..."
+                    value={googleQuery}
+                    onChange={(e) => setGoogleQuery(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+                <div className="import-list">
+                  {googleForms
+                    .filter((gf) => (gf.name || "Untitled form").toLowerCase().includes(googleQuery.toLowerCase()))
+                    .map((gf) => {
+                      // Already linked to a form on THIS device — importing again would just be a
+                      // round trip to confirm what we already know locally (the cloud server itself
+                      // now also dedups by google_form_id, but there's no reason to make the request
+                      // at all when the answer is sitting right here in `forms`).
+                      const linkedForm = forms.find((f) => f.googleFormId === gf.id);
+                      return (
+                        <div className="import-row" key={gf.id}>
+                          <span className="import-row-icon">
+                            <Icons.fileText />
+                          </span>
+                          <span className="import-row-text">
+                            <span className="import-row-title">{gf.name || "Untitled form"}</span>
+                            <span className="import-row-meta">
+                              Edited {new Date(gf.modifiedTime).toLocaleDateString()}
+                              {linkedForm && <span className="import-row-status is-ok">Already imported</span>}
+                            </span>
+                          </span>
+                          <span className="import-row-actions">
+                            {linkedForm ? (
+                              <button
+                                type="button"
+                                className="dash-ghost-btn"
+                                onClick={() => {
+                                  setShowGoogleFormsModal(false);
+                                  navigate(`/forms/${linkedForm.id}`);
+                                }}
+                              >
+                                Open
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="dash-primary-btn"
+                                disabled={googleImportingId === gf.id}
+                                onClick={() => handleGoogleFormImport(gf)}
+                              >
+                                {googleImportingId === gf.id ? "Importing…" : "Import"}
+                              </button>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </>
             )}
           </div>
         </Dialog>

@@ -33,6 +33,7 @@ export default function SyncStatus() {
 
   const pending = status?.pendingCount || 0;
   const failed = status?.failedCount || 0;
+  const unsaved = status?.unsavedToCloudCount || 0;
 
   return (
     <div className="dash-sync">
@@ -54,6 +55,7 @@ export default function SyncStatus() {
               <span className="dash-sync-detail">
                 {status?.lastSyncedAt ? `Last synced ${timeAgo(status.lastSyncedAt)}` : "Never synced"}
                 {pending > 0 ? ` · ${pending} pending` : ""}
+                {unsaved > 0 ? ` · ${unsaved} from Google not saved to cloud` : ""}
               </span>
             </>
           )}

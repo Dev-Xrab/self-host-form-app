@@ -38,12 +38,13 @@ export const cloudApi = {
     window.open(url, "_blank", "noopener,noreferrer");
   },
   listForms: () => request("/forms"),
-  importForm: (id, version) =>
-    request(`/forms/${id}/import`, { method: "POST", body: JSON.stringify(version ? { version } : {}) }),
+  // Always brings in the cloud copy's latest. `overwrite` is only needed when this device's copy
+  // has local edits the cloud doesn't have (the server answers 409 otherwise).
+  importForm: (id, { overwrite = false } = {}) =>
+    request(`/forms/${id}/import`, { method: "POST", body: JSON.stringify({ overwrite }) }),
   publishForm: (id) => request(`/forms/${id}/publish`, { method: "POST" }),
   // `id` here is the CLOUD form's own id, not a local one — these operate on forms browsed in
   // "Import from Cloud" that may not be imported onto this device at all.
-  listCloudFormVersions: (id) => request(`/forms/cloud/${id}/versions`),
   deleteCloudForm: (id) => request(`/forms/cloud/${id}`, { method: "DELETE" }),
   syncStatus: () => request("/sync/status"),
   sync: () => request("/sync", { method: "POST" }),
@@ -57,6 +58,9 @@ export const cloudApi = {
   // Applies the host's decision from the sync dialog and pulls in new responses either way.
   applyGoogleFormChanges: (id, decision) =>
     request(`/google-forms/${id}/apply-changes`, { method: "POST", body: JSON.stringify({ decision }) }),
+  // Queues the Google responses fetched onto this device (kept local until now) for upload and
+  // syncs them. `id` is the LOCAL form id.
+  saveGoogleResponsesToCloud: (id) => request(`/google-forms/${id}/save-to-cloud`, { method: "POST" }),
   listSyncIssues: () => request("/sync/issues"),
   retrySyncIssue: (id) => request(`/sync/issues/${id}/retry`, { method: "POST" }),
   discardSyncIssue: (id) => request(`/sync/issues/${id}/discard`, { method: "POST" }),

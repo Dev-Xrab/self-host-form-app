@@ -15,7 +15,7 @@
   --rf-indent: 32px;
 
   width: 100%;
-  min-height: 100vh;
+  min-height: calc(100vh - var(--titlebar-height));
 
   display: flex;
   justify-content: center;
@@ -220,6 +220,36 @@
   color: var(--rf-text-secondary);
   text-decoration: underline;
   cursor: pointer;
+}
+
+.respond-toolbar-right {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.respond-fullscreen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  padding: 6px 12px;
+  border: 1px solid var(--rf-border);
+  border-radius: 7px;
+  background: var(--rf-card);
+
+  font-family: Inter, sans-serif;
+  font-size: 13px;
+  color: var(--rf-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.respond-fullscreen-btn:hover {
+  background: var(--rf-bg);
+  border-color: var(--rf-border-strong);
+  color: var(--rf-text);
 }
 
 .respond-timer {
@@ -1039,4 +1069,205 @@ input[type="checkbox"]:focus-visible {
   .respond-exit-dialog {
     width: 100%;
   }
+}
+
+/* Connection lost: blur + lock the whole screen (form setting "blurOnDisconnect"). Black & white,
+   like the rest of the app; sits above everything, including the fullscreen quiz. */
+.connection-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+
+  display: grid;
+  place-items: center;
+  padding: 24px;
+
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  font-family: Inter, sans-serif;
+}
+
+.connection-overlay-card {
+  max-width: 360px;
+  padding: 28px 28px 26px;
+  text-align: center;
+
+  background: var(--surface-card);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
+}
+
+.connection-overlay-card h2 {
+  margin: 14px 0 6px;
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.connection-overlay-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.connection-overlay-spinner {
+  display: block;
+  width: 26px;
+  height: 26px;
+  margin: 0 auto;
+  border: 2.5px solid var(--border-strong);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: connection-spin 0.9s linear infinite;
+}
+
+@keyframes connection-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Restrict copying (form setting "restrictCopying", see useCopyProtection.js): no text selection or
+   dragging on the page, except inside answer fields so people can still type and edit. */
+body.copy-protected .respond-page {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+body.copy-protected .respond-page input,
+body.copy-protected .respond-page textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+body.copy-protected .respond-page img {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+@media print {
+  body.copy-protected .respond-page {
+    display: none !important;
+  }
+}
+
+/* Tab-refocus lock (session setting "refocusLockSeconds"): fully covers the answering screen —
+   opaque, not blurred-through like ConnectionOverlay — for a countdown after the respondent
+   switches back to this tab. Black & white, matching the rest of the app. */
+.refocus-lock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+
+  display: grid;
+  place-items: center;
+  padding: 24px;
+
+  background: var(--rf-bg, var(--surface-bg));
+  font-family: Inter, sans-serif;
+}
+
+.refocus-lock-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 340px;
+  text-align: center;
+}
+
+.refocus-lock-count {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  margin-bottom: 18px;
+  border: 2px solid var(--rf-text, var(--text));
+  border-radius: 50%;
+
+  font-size: 30px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--rf-text, var(--text));
+}
+
+.refocus-lock-card h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 650;
+  color: var(--rf-text, var(--text));
+}
+
+.refocus-lock-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--rf-text-secondary, var(--text-secondary));
+}
+
+/* Fullscreen gate (session setting "fullscreenEnabled"): shown whenever this tab should be in
+   fullscreen but currently isn't — reload, Esc, or anything else that dropped it. Same opaque,
+   full-cover treatment as the refocus lock above, since both fully block the questions. */
+.fullscreen-gate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+
+  display: grid;
+  place-items: center;
+  padding: 24px;
+
+  background: var(--rf-bg, var(--surface-bg));
+  font-family: Inter, sans-serif;
+}
+
+.fullscreen-gate-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 340px;
+  text-align: center;
+}
+
+.fullscreen-gate-icon {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  margin-bottom: 18px;
+  border: 2px solid var(--rf-text, var(--text));
+  border-radius: 50%;
+
+  font-size: 30px;
+  color: var(--rf-text, var(--text));
+}
+
+.fullscreen-gate-card h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 650;
+  color: var(--rf-text, var(--text));
+}
+
+.fullscreen-gate-card p {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--rf-text-secondary, var(--text-secondary));
+}
+
+.fullscreen-gate-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  background: var(--rf-text, var(--text));
+
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rf-bg, var(--surface-bg));
+  cursor: pointer;
 }

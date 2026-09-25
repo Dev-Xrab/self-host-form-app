@@ -1,7 +1,11 @@
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
 import useFormStore, { useFormActions } from "../../../../store/useFormStore";
 import { QUESTION_TYPES } from "../../../lib/questionRegistry";
 import { Icons } from "../icons";
+import Dialog from "../../Dialog/Dialog";
+import { cloudApi } from "../../../features/cloud/services/cloudApi";
+import { describeCloudError } from "../../../features/cloud/utils/describeCloudError";
 import "./sidebar.css";
 import logo from "../../../../src/images/logo.png";
 
@@ -23,7 +27,37 @@ export default function Sidebar() {
   const saveStatus = useFormStore((s) => s.saveStatus);
   const saveError = useFormStore((s) => s.saveError);
   const recalculatedResponses = useFormStore((s) => s.recalculatedResponses);
-  const { addQuestion, addSection, setMode, saveForm } = useFormActions();
+  const cloudUnsaved = useFormStore((s) => s.cloudUnsaved);
+  const { addQuestion, addSection, setMode, saveForm, setCloudUnsaved } = useFormActions();
+
+  // After a local save, a cloud-linked form that now differs from its cloud copy asks whether to
+  // save the change there too — "Not now" leaves it flagged (the sidebar keeps a Save to cloud
+  // button, and the Forms list shows an Unsaved changes badge) rather than silently diverging.
+  const [showCloudPrompt, setShowCloudPrompt] = useState(false);
+  const [cloudSaving, setCloudSaving] = useState(false);
+  const [cloudSaveError, setCloudSaveError] = useState(null);
+  const promptedFor = useRef(null);
+  useEffect(() => {
+    if (saveStatus === "saved" && cloudUnsaved && promptedFor.current !== saveStatus + formId) {
+      promptedFor.current = saveStatus + formId;
+      setShowCloudPrompt(true);
+    }
+    if (saveStatus !== "saved") promptedFor.current = null;
+  }, [saveStatus, cloudUnsaved, formId]);
+
+  const handleSaveToCloud = async () => {
+    setCloudSaving(true);
+    setCloudSaveError(null);
+    try {
+      await cloudApi.publishForm(formId);
+      setCloudUnsaved(false);
+      setShowCloudPrompt(false);
+    } catch (err) {
+      setCloudSaveError(describeCloudError(err));
+    } finally {
+      setCloudSaving(false);
+    }
+  };
 
   const NAV_ITEMS = [
     { to: `/forms/${formId}`, label: "Questions", end: true },
@@ -165,6 +199,11 @@ export default function Sidebar() {
             Rescored {recalculatedResponses} existing response{recalculatedResponses === 1 ? "" : "s"}.
           </span>
         )}
+        {cloudUnsaved && saveStatus !== "saving" && (
+          <button type="button" className="form-sidebar-save-note" onClick={() => setShowCloudPrompt(true)}>
+            Changes not saved to cloud
+          </button>
+        )}
         <button
           type="button"
           className="form-sidebar-save"
@@ -174,6 +213,26 @@ export default function Sidebar() {
           {SAVE_LABEL[saveStatus]}
         </button>
       </div>
+
+      {showCloudPrompt && (
+        <Dialog title="Save changes to cloud?" onClose={() => setShowCloudPrompt(false)}>
+          <div className="dash-form">
+            <p className="dash-form-label">
+              This form is saved in your cloud account, and your changes aren't there yet. Save them now so your
+              other devices get the latest version?
+            </p>
+            {cloudSaveError && <p className="dash-form-error">{cloudSaveError}</p>}
+            <div className="dash-modal-footer">
+              <button type="button" className="dash-ghost-btn" onClick={() => setShowCloudPrompt(false)} disabled={cloudSaving}>
+                Not now
+              </button>
+              <button type="button" className="dash-primary-btn" onClick={handleSaveToCloud} disabled={cloudSaving}>
+                {cloudSaving ? "Saving…" : "Save to cloud"}
+              </button>
+            </div>
+          </div>
+        </Dialog>
+      )}
     </aside>
   );
 }

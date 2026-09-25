@@ -7,7 +7,7 @@
 .dash {
   display: flex;
   width: 100%;
-  min-height: 100vh;
+  min-height: calc(100vh - var(--titlebar-height));
 
   font-family: Inter, sans-serif;
   background: var(--surface-bg);
@@ -17,9 +17,9 @@
 .dash-nav {
   flex-shrink: 0;
   width: 224px;
-  height: 100vh;
+  height: calc(100vh - var(--titlebar-height));
   position: sticky;
-  top: 0;
+  top: var(--titlebar-height);
 
   display: flex;
   flex-direction: column;
@@ -36,7 +36,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  
+
 
   padding: 4px 8px;
 
@@ -45,6 +45,33 @@
   color: var(--text);
 }
 
+.dash-nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.dash-nav-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* Structurally invisible at desktop/tablet widths — nav-list/SyncStatus/logout lay out as
+   direct flex children of .dash-nav. Only becomes a real (positioned) element once the
+   ≤640px rule below turns it into the collapsible dropdown. */
+.dash-nav-collapsible {
+  display: contents;
+}
 
 .dash-nav-list {
   display: flex;
@@ -331,6 +358,7 @@
 
 .dash-header-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
@@ -1387,8 +1415,13 @@
 }
 
 .dash-password-form {
-  padding: 4px 20px 20px;
-  max-width: 360px;
+  padding: 20px;
+  max-width: 400px;
+}
+
+/* When the default-password warning sits above the form, that note already supplies the top gap. */
+.dash-settings-note + .dash-password-form {
+  padding-top: 16px;
 }
 
 .dash-password-submit {
@@ -1652,13 +1685,6 @@
   min-width: 0;
 }
 
-.gradebook-session-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 8px;
-}
-
 .bulk-quiz-row {
   justify-content: flex-start;
   gap: 10px;
@@ -1709,145 +1735,11 @@
   color: var(--text-tertiary);
 }
 
-/* Gradebook page */
-.gradebook-roster-card {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.gradebook-roster-input {
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  resize: vertical;
-  margin-top: 6px;
-}
-
-.gradebook-table-wrap {
-  overflow-x: auto;
-}
-
-.gradebook-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: Inter, sans-serif;
-  font-size: 13px;
-}
-
-.gradebook-table th,
-.gradebook-table td {
-  padding: 10px 16px;
-  text-align: left;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--surface-muted);
-}
-
-.gradebook-table thead th {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
-  background: #fbfbfa;
-  border-bottom: 1px solid var(--border);
-}
-
-.gradebook-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.gradebook-col-header {
-  min-width: 200px;
-}
-
-.gradebook-col-header-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.gradebook-col-select {
-  flex: 1;
-  min-width: 0;
-  padding: 5px 8px;
-  font-size: 12px;
-  text-transform: none;
-  letter-spacing: normal;
-  color: var(--text);
-  font-weight: 500;
-}
-
-.gradebook-score-cell {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.gradebook-average-cell {
-  color: #2f2e2b;
-  border-left: 1px solid var(--surface-muted);
-}
-
-.gradebook-roster-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fbfbfa;
-}
-
-.gradebook-search {
-  margin: 4px 0;
-}
-
-.gradebook-roster-toggle {
-  white-space: nowrap;
-}
-
-.gradebook-roster-toggle .ui-checkbox-label {
-  font-size: 12.5px;
-  color: var(--text-secondary);
-}
-
-.gradebook-roster-badge {
-  margin-left: 8px;
-  padding: 2px 7px;
-  border-radius: 100px;
-  background: var(--surface-muted);
-
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-
-/* "Not on roster" — shown only when "Include non-roster respondents" surfaces a real submitted
-   response from someone (including a former roster member) who isn't a current roster match, so
-   it reads as distinctly non-authoritative rather than looking like an ordinary roster row. */
-.gradebook-roster-badge-muted {
-  background: transparent;
-  border: 1px solid var(--border);
-}
-
-.gradebook-row-unmatched td {
-  color: var(--text-tertiary);
-}
-
-.gradebook-row-unmatched .gradebook-score-cell {
-  color: var(--text-secondary);
-}
-
-/* Roster manager (used inside Gradebook) */
+/* Roster manager (used inside Bulk Export) */
 .roster-paste-block {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-bottom: 14px;
 }
 
 .roster-paste-hint {
@@ -1865,57 +1757,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 2px;
-}
-
-.roster-replace-toggle .ui-checkbox-label {
-  font-size: 12.5px;
-  color: var(--text-secondary);
-}
-
-.roster-empty-note {
-  padding: 0 4px;
-}
-
-.roster-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-card);
-}
-
-.roster-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: Inter, sans-serif;
-  font-size: 13px;
-}
-
-.roster-table th,
-.roster-table td {
-  padding: 8px 12px;
-  text-align: left;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--surface-muted);
-}
-
-.roster-table thead th {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
-  background: #fbfbfa;
-  border-bottom: 1px solid var(--border);
-}
-
-.roster-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.roster-row-remove {
-  width: 1%;
-  text-align: right;
+  min-height: 20px;
 }
 
 @media (max-width: 1000px) {
@@ -2010,6 +1852,62 @@
   }
 }
 
+/* Below this width the horizontal nav strip above no longer fits Dashboard/Sessions/
+   Folders/Forms/Bulk Export/Settings plus the sync widget and logout button — several
+   items became unreachable with no scroll affordance. Collapse into a dropdown instead. */
+@media (max-width: 640px) {
+  .dash-nav {
+    position: relative;
+  }
+
+  .dash-nav-toggle {
+    display: flex;
+  }
+
+  .dash-nav-collapsible {
+    display: none;
+  }
+
+  .dash-nav-open .dash-nav-collapsible {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 50;
+
+    padding: 8px;
+    background: #fbfbfa;
+    border: 1px solid var(--border);
+    border-top: none;
+    box-shadow: var(--shadow-md);
+  }
+
+  .dash-nav-open .dash-nav-list {
+    flex-direction: column;
+    overflow-x: visible;
+  }
+
+  .dash-nav-open .dash-nav-item {
+    white-space: normal;
+  }
+
+  .dash-nav-open .dash-sync {
+    flex-direction: column;
+    align-items: stretch;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .dash-nav-open .dash-nav-logout {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
+
 @media (max-width: 560px) {
   .quiz-col-allotted,
   .quiz-time-allotted {
@@ -2075,5 +1973,205 @@
 
   .bulk-quiz-row {
     flex-wrap: wrap;
+  }
+}
+
+/* "Save fetched Google responses to the cloud?" prompt */
+.save-responses-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfbfa;
+}
+
+.save-responses-prompt p {
+  margin: 0;
+}
+
+.save-responses-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Import from Cloud / Import Google Form — a searchable list of remote forms to bring onto this
+   device. Wider than the default dialog (these rows carry more than a confirm message), and one
+   row style shared by both since they show the same shape: icon, title + meta, status, actions. */
+.import-dialog {
+  max-width: 560px;
+}
+
+.import-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px 20px;
+}
+
+.import-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text-tertiary);
+}
+
+.import-search svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.import-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.import-search:focus-within {
+  border-color: var(--text);
+}
+
+.import-empty {
+  margin: 0;
+  padding: 28px 12px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+}
+
+.import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(52vh, 440px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.import-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-card);
+  transition: border-color 100ms ease-out, background 100ms ease-out;
+}
+
+.import-row:hover {
+  border-color: var(--border-strong);
+  background: #fbfbfa;
+}
+
+.import-row-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+}
+
+.import-row-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.import-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.import-row-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+}
+
+.import-row-status {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.import-row-status.is-attention {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--accent-contrast);
+}
+
+.import-row-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.import-row-delete {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background 100ms ease-out, color 100ms ease-out;
+}
+
+.import-row-delete svg {
+  width: 14px;
+  height: 14px;
+}
+
+.import-row-delete:hover {
+  background: var(--text);
+  color: var(--accent-contrast);
+}
+
+@media (max-width: 640px) {
+  .import-row {
+    flex-wrap: wrap;
+  }
+
+  .import-row-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 }

@@ -79,16 +79,44 @@ export async function upsertResponse({ id, formId, ownerId, deviceId, version, p
 // Cursor-based download: only rows changed since `cursor`, oldest first, capped at PAGE_SIZE.
 // A caller that gets back exactly PAGE_SIZE rows should call again with the new cursor — this
 // is what keeps a large backlog from ever being downloaded in one shot.
-export async function listChangesSince(ownerId, cursor) {
+//
+// `formId` (optional) narrows the download to one form — used to backfill a form's responses right
+// after it's imported on a device whose global cursor is already past them.
+export async function listChangesSince(ownerId, cursor, formId = null) {
   const { rows } = await pool.query(
     `SELECT r.id, r.form_id, r.form_version, r.payload, r.version, r.device_id, r.server_seq,
             d.name AS device_name
      FROM responses r
      JOIN devices d ON d.id = r.device_id
-     WHERE r.owner_id = $1 AND r.server_seq > $2
+     WHERE r.owner_id = $1 AND r.server_seq > $2 AND ($4::uuid IS NULL OR r.form_id = $4::uuid)
      ORDER BY r.server_seq ASC
      LIMIT $3`,
-    [ownerId, cursor, PAGE_SIZE]
+    [ownerId, cursor, PAGE_SIZE, formId]
   );
   return { rows, pageSize: PAGE_SIZE };
+}
+
+// The dedup ledger for responses that came from a real Google Form (see google_form_imports in
+// db.js). A response the host fetched locally and later chose to save to the cloud arrives through
+// the normal upload path carrying its Google response id in the payload — these two functions are
+// what keep that from duplicating a copy the cloud already has, and what make a later cloud-side
+// "refresh from Google" skip it.
+export async function findGoogleImport(ownerId, formId, googleResponseId) {
+  const { rows } = await pool.query(
+    `SELECT g.response_id
+     FROM google_form_imports g
+     JOIN forms f ON f.id = g.form_id
+     WHERE g.form_id = $1 AND g.google_response_id = $2 AND f.owner_id = $3`,
+    [formId, googleResponseId, ownerId]
+  );
+  return rows[0] || null;
+}
+
+export async function recordGoogleImport(formId, googleResponseId, responseId) {
+  await pool.query(
+    `INSERT INTO google_form_imports (form_id, google_response_id, response_id)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (form_id, google_response_id) DO NOTHING`,
+    [formId, googleResponseId, responseId]
+  );
 }

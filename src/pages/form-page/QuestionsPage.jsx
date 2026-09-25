@@ -1,4 +1,5 @@
 import FormInfo from "../../components/FormComponents/FormInfo/FormInfo";
+import FormBanner from "../../components/FormComponents/FormInfo/FormBanner";
 import Question from "../../components/FormComponents/Question/Question";
 import Section from "../../components/FormComponents/Section/Section";
 import WindowContainer from "../../components/Window Container/WindowContainer";
@@ -19,7 +20,16 @@ export default function QuestionsPage() {
 
   return (
     <div className="page-form-column">
-      <WindowContainer component={<FormInfo />} navigationpath="Form Info" center={false} />
+      <WindowContainer
+        component={
+          <>
+            <FormBanner />
+            <FormInfo />
+          </>
+        }
+        navigationpath="Form Info"
+        center={false}
+      />
 
       {(() => {
         let questionNumber = 0;

@@ -4,6 +4,25 @@
 
 const CHOICE_TYPES = new Set(["multiple_choice", "dropdown", "checkboxes"]);
 
+// An empty checkboxes answer arrives as `[]` (and an untouched grid row as `""`/`[]`), which is
+// "no answer" — counting it as answered inflated every percentage's denominator.
+function isAnswered(raw) {
+  if (raw === undefined || raw === null || raw === "") return false;
+  if (Array.isArray(raw)) return raw.length > 0;
+  return true;
+}
+
+// The one percentage formula for the on-screen bars and both export formats. Rounded to one
+// decimal so 1 of 3 reads 33.3%, not a rounded-off 33%, and a bar's length (count / total) is the
+// same number its label prints.
+export function percentOf(count, total) {
+  return total ? Math.round((count / total) * 1000) / 10 : 0;
+}
+
+export function formatPercent(count, total) {
+  return `${percentOf(count, total)}%`;
+}
+
 function median(sortedValues) {
   const mid = Math.floor(sortedValues.length / 2);
   return sortedValues.length % 2 === 0
@@ -35,7 +54,7 @@ function aggregateChoice(question, responses) {
   let total = 0;
   responses.forEach((r) => {
     const raw = r.answers?.[question.id];
-    if (raw === undefined || raw === null || raw === "") return;
+    if (!isAnswered(raw)) return;
     total += 1;
     const labels =
       question.type === "checkboxes"
@@ -101,7 +120,7 @@ function aggregateMatrix(question, responses) {
     let rowTotal = 0;
     responses.forEach((r) => {
       const raw = r.answers?.[question.id]?.[row.id];
-      if (raw === undefined || raw === null) return;
+      if (!isAnswered(raw)) return;
       const vals = isCheckbox ? (Array.isArray(raw) ? raw : []) : [raw];
       if (vals.length === 0) return;
       rowTotal += 1;

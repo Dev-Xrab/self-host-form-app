@@ -6,7 +6,7 @@ const useAuthStore = create((set) => ({
   isLogin: false,
   isChecking: true, // true until the initial /api/auth/me check resolves
   isSubmitting: false,
-  isDefaultPassword: false,
+  needsSetup: false, // true when no one has created an account on this server yet
   hasRecoveryQuestion: false,
   error: null,
 
@@ -14,10 +14,10 @@ const useAuthStore = create((set) => ({
   actions: {
     checkSession: async () => {
       try {
-        const { authenticated, isDefaultPassword, hasRecoveryQuestion } = await authApi.me();
+        const { authenticated, needsSetup, hasRecoveryQuestion } = await authApi.me();
         set({
           isLogin: authenticated,
-          isDefaultPassword: !!isDefaultPassword,
+          needsSetup: !!needsSetup,
           hasRecoveryQuestion: !!hasRecoveryQuestion,
           isChecking: false,
         });
@@ -26,13 +26,29 @@ const useAuthStore = create((set) => ({
       }
     },
 
+    setup: async (password) => {
+      set({ isSubmitting: true, error: null });
+      try {
+        const { hasRecoveryQuestion } = await authApi.setup(password);
+        set({
+          isLogin: true,
+          needsSetup: false,
+          hasRecoveryQuestion: !!hasRecoveryQuestion,
+          isSubmitting: false,
+        });
+        return true;
+      } catch (err) {
+        set({ isSubmitting: false, error: err.message });
+        return false;
+      }
+    },
+
     login: async (password) => {
       set({ isSubmitting: true, error: null });
       try {
-        const { isDefaultPassword, hasRecoveryQuestion } = await authApi.login(password);
+        const { hasRecoveryQuestion } = await authApi.login(password);
         set({
           isLogin: true,
-          isDefaultPassword: !!isDefaultPassword,
           hasRecoveryQuestion: !!hasRecoveryQuestion,
           isSubmitting: false,
         });
@@ -51,7 +67,6 @@ const useAuthStore = create((set) => ({
       }
     },
 
-    passwordChanged: () => set({ isDefaultPassword: false }),
     recoveryQuestionSet: () => set({ hasRecoveryQuestion: true }),
   },
 }));

@@ -76,12 +76,17 @@ export async function consumeHandoff(code) {
   return rows[0] || null;
 }
 
+// Returns false when the device id already belongs to another account — the conflict update is
+// scoped to the same user, so it matches no row and RETURNING comes back empty.
 export async function upsertDevice({ deviceId, userId, name }) {
-  await pool.query(
+  const { rows } = await pool.query(
     `INSERT INTO devices (id, user_id, name, last_seen_at) VALUES ($1, $2, $3, now())
-     ON CONFLICT (id) DO UPDATE SET last_seen_at = now(), name = excluded.name`,
+     ON CONFLICT (id) DO UPDATE SET last_seen_at = now(), name = excluded.name
+     WHERE devices.user_id = excluded.user_id
+     RETURNING id`,
     [deviceId, userId, name || ""]
   );
+  return rows.length > 0;
 }
 
 export async function issueSession({ userId, deviceId }) {

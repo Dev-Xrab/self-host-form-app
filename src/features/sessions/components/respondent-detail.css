@@ -1,3 +1,13 @@
+/* Respondent detail modal — was stuck at the shared Dialog's default 420px width, which forced
+   the answer rows into a cramped side-by-side layout with its own inner scrollbar (both
+   vertical and horizontal). Widened here, and the questions now scroll with the rest of the
+   modal (Dialog's own .dash-modal already does that) instead of in a second nested box. */
+/* Two classes (not one) so this reliably beats .dash-modal's own max-width:420px regardless of
+   which stylesheet Vite happens to place later in the bundle. */
+.dash-modal.respondent-dialog {
+  max-width: min(720px, 92vw);
+}
+
 .respondent-detail {
   display: flex;
   flex-direction: column;
@@ -68,11 +78,6 @@
     width: 100%;
   }
 
-  .respondent-detail-questions {
-    max-height: none;
-    overflow: visible;
-  }
-
   .respondent-detail-print-header {
     display: flex;
     align-items: center;
@@ -109,26 +114,76 @@
   }
 }
 
+/* ---------- Summary: score + submitted time + edit code ---------- */
 .respondent-detail-summary {
   display: flex;
-  gap: 16px;
-  padding: 10px 12px;
-  border-radius: 6px;
-  background: var(--surface-bg);
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fbfbfa;
+}
 
-  font-size: 13.5px;
+.respondent-score {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.respondent-score strong {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
   color: var(--text);
+}
+
+.respondent-score strong span {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.respondent-score-pct {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+
+.respondent-score-empty strong {
+  color: var(--text-tertiary);
+}
+
+.respondent-score-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.respondent-summary-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
 }
 
 .respondent-edit-code {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .respondent-edit-code strong {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.03em;
+  color: var(--text-secondary);
 }
 
 .respondent-edit-code-toggle {
@@ -150,7 +205,7 @@
 }
 
 .respondent-edit-code-toggle:hover {
-  background: #ebebe9;
+  background: var(--surface-muted);
   color: var(--text);
 }
 
@@ -160,126 +215,170 @@
   }
 }
 
+/* ---------- Questions ---------- */
 .respondent-detail-questions {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 50vh;
-  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .respondent-question {
-  padding: 12px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
 }
 
-.respondent-question-header {
+.respondent-question-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
-.respondent-question-index {
-  font-size: 11.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+.respondent-question-num {
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 5px;
+  background: var(--surface-muted);
+  font-size: 10.5px;
+  font-weight: 700;
   color: var(--text-tertiary);
-}
-
-.respondent-question-status {
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.respondent-question-status.is-correct {
-  color: var(--text);
-}
-
-.respondent-question-status.is-wrong {
-  color: var(--danger);
 }
 
 .respondent-question-title {
-  margin: 0 0 8px;
+  flex: 1;
+  min-width: 0;
   font-size: 13.5px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text);
 }
 
-.respondent-answer-row {
-  display: flex;
-  gap: 8px;
-  font-size: 13px;
-  padding: 3px 0;
+.respondent-result {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 650;
 }
 
-.respondent-answer-label {
+.respondent-result.is-correct {
+  color: var(--text);
+}
+
+.respondent-result.is-wrong {
+  color: var(--danger);
+}
+
+.respondent-answer {
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: var(--surface-bg);
+  border-left: 3px solid var(--text);
+
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.respondent-answer.is-empty {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--text-tertiary);
+  border-left-color: var(--border-strong);
+}
+
+.respondent-correct {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--surface-muted);
+  font-size: 12.5px;
+}
+
+.respondent-correct span {
   flex-shrink: 0;
-  width: 70px;
   color: var(--text-tertiary);
 }
 
-.respondent-answer-value {
+.respondent-correct strong {
+  font-weight: 600;
   color: var(--text);
-  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- File answers ---------- */
+.respondent-file {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.respondent-file-thumb {
+  align-self: flex-start;
+  display: block;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-bg);
+  cursor: zoom-in;
+  transition: border-color 0.15s;
+}
+
+.respondent-file-thumb:hover {
+  border-color: var(--border-strong);
+}
+
+.respondent-file-thumb img {
+  display: block;
+  max-width: 220px;
+  max-height: 220px;
+  object-fit: contain;
 }
 
 .respondent-file-actions {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
 }
 
 .respondent-file-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: none;
-  background: none;
-  padding: 0;
-  color: #2563eb;
-  font-family: Inter, sans-serif;
-  font-size: 13px;
-  font-weight: 500;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-card);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text-secondary);
   text-decoration: none;
   cursor: pointer;
 }
 
 .respondent-file-link:hover {
-  text-decoration: underline;
+  background: var(--surface-muted);
+  color: var(--text);
 }
 
 .respondent-file-link svg {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
 }
 
-.respondent-file-preview-link {
-  display: block;
-  margin-top: 6px;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: zoom-in;
-}
-
-.respondent-file-preview {
-  max-width: 220px;
-  max-height: 220px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  object-fit: contain;
-  transition: border-color 0.15s;
-}
-
-.respondent-file-preview-link:hover .respondent-file-preview {
-  border-color: var(--border-strong);
-}
-
-/* Full-view lightbox — stacked above .dash-modal-overlay (z-index: 100), see Modal.jsx. */
+/* Full-view lightbox — stacked above .dash-modal-overlay (z-index: 100), see Dialog.jsx. */
 .respondent-lightbox-overlay {
   position: fixed;
   inset: 0;

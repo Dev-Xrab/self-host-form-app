@@ -1,20 +1,6 @@
-const makeIcon = (paths) =>
-  function IconComponent({ className = "", ...rest }) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        className={`icon ${className}`}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        {...rest}
-      >
-        {paths}
-      </svg>
-    );
-  };
+import makeIconFactory from "../../lib/makeIcon";
+
+const makeIcon = (paths) => makeIconFactory(paths, "icon");
 
 export const Icons = {
   shortAnswer: makeIcon(

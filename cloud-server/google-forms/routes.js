@@ -1,10 +1,23 @@
 import { Router } from "express";
 import { listGoogleForms, getGoogleForm, GoogleApiError } from "./client.js";
 import { translateGoogleForm } from "./translate.js";
-import { importResponsesForForm } from "./repository.js";
+import { importResponsesForForm, listNewResponsesForForm } from "./repository.js";
 import * as formsRepo from "../forms/repository.js";
 
 export const googleFormsRouter = Router();
+
+// :formId is this app's own cloud form id (a uuid column); :id is a Google Drive file id. Both are
+// checked up front so a malformed value is a clean 404, never a database/Google API error.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DRIVE_ID_PATTERN = /^[A-Za-z0-9_-]{10,200}$/;
+googleFormsRouter.param("formId", (req, res, next, id) => {
+  if (!UUID_PATTERN.test(id)) return res.status(404).json({ error: "Form not found." });
+  next();
+});
+googleFormsRouter.param("id", (req, res, next, id) => {
+  if (!DRIVE_ID_PATTERN.test(id)) return res.status(404).json({ error: "Google Form not found." });
+  next();
+});
 
 function handleGoogleApiError(err, res) {
   if (err instanceof GoogleApiError && err.status === 401) {
@@ -68,18 +81,23 @@ googleFormsRouter.post("/:id/import", async (req, res) => {
     // responses (e.g. a missing/rejected OAuth scope) must not make the whole import look like
     // it failed and lose that form. Surfaced as `responseImportError` instead so the caller can
     // tell the user their form came in fine but responses didn't.
+    //
+    // `?responses=false` skips this: the local app fetches responses itself (see
+    // GET /:formId/responses/new below) so the host can decide whether they're saved to the cloud.
     let importedCount = 0;
     let skippedExistingCount = 0;
     let responseImportError = null;
-    try {
-      ({ importedCount, skippedExistingCount } = await importResponsesForForm(
-        req.userId,
-        created.id,
-        req.params.id,
-        questions
-      ));
-    } catch (err) {
-      responseImportError = err.message;
+    if (req.query.responses !== "false") {
+      try {
+        ({ importedCount, skippedExistingCount } = await importResponsesForForm(
+          req.userId,
+          created.id,
+          req.params.id,
+          questions
+        ));
+      } catch (err) {
+        responseImportError = err.message;
+      }
     }
 
     res.status(201).json({
@@ -147,15 +165,17 @@ googleFormsRouter.post("/:formId/refresh", async (req, res) => {
     let importedCount = 0;
     let skippedExistingCount = 0;
     let responseImportError = null;
-    try {
-      ({ importedCount, skippedExistingCount } = await importResponsesForForm(
-        req.userId,
-        req.params.formId,
-        current.googleFormId,
-        liveQuestions
-      ));
-    } catch (err) {
-      responseImportError = err.message;
+    if (req.query.responses !== "false") {
+      try {
+        ({ importedCount, skippedExistingCount } = await importResponsesForForm(
+          req.userId,
+          req.params.formId,
+          current.googleFormId,
+          liveQuestions
+        ));
+      } catch (err) {
+        responseImportError = err.message;
+      }
     }
 
     res.json({
@@ -167,6 +187,25 @@ googleFormsRouter.post("/:formId/refresh", async (req, res) => {
       skippedExistingResponseCount: skippedExistingCount,
       responseImportError,
     });
+  } catch (err) {
+    handleGoogleApiError(err, res);
+  }
+});
+
+// Read-only: the live Google Form's responses that this account's cloud copy doesn't hold yet. The
+// local app stores them on the device first and asks the host whether to save them to the cloud —
+// see server/cloud/routes.js pullGoogleResponsesLocally. Nothing is written here.
+googleFormsRouter.get("/:formId/responses/new", async (req, res) => {
+  try {
+    const current = await formsRepo.getFormForOwner(req.userId, req.params.formId);
+    if (!current) return res.status(404).json({ error: "Form not found." });
+    if (!current.googleFormId) {
+      return res.status(400).json({ error: "This form wasn't imported from Google Forms." });
+    }
+
+    const googleForm = await getGoogleForm(req.userId, current.googleFormId);
+    const { questions } = translateGoogleForm(googleForm);
+    res.json(await listNewResponsesForForm(req.userId, req.params.formId, current.googleFormId, questions));
   } catch (err) {
     handleGoogleApiError(err, res);
   }

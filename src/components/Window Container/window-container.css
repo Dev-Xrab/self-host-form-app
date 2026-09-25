@@ -20,7 +20,7 @@
 }
 
 .role-page-wrapper-centered {
-  min-height: 100vh;
+  min-height: calc(100vh - var(--titlebar-height));
   box-sizing: border-box;
   padding: 40px 16px;
   align-items: center;
@@ -31,7 +31,6 @@
 
   display: flex;
   align-items: center;
-  gap: 7px;
 
   padding: 0 16px;
 
@@ -40,18 +39,7 @@
   box-sizing: border-box;
 }
 
-.role-page-dot {
-  width: 8px;
-  height: 8px;
-
-  border-radius: 50%;
-
-  background: #d9d9d6;
-}
-
 .role-page-breadcrumb {
-  margin-left: 8px;
-
   font-size: 14px;
   font-weight: 400;
   color: var(--text-secondary);

@@ -1,0 +1,63 @@
+name: Build macOS
+
+# Electron-builder can't produce a real macOS build (.dmg) from Windows — DMG creation and
+# code signing rely on native macOS tools (hdiutil, codesign). This runs on GitHub's own
+# macos runner instead, so no local Mac is needed. Trigger it manually from the Actions tab,
+# or by pushing a version tag.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      # No build/icon.icns is committed (only the Windows .ico) — generate one here from the
+      # existing 1125x1125 source PNG using macOS's own iconutil, so nothing mac-specific
+      # needs to live in the repo or be maintained by hand.
+      - name: Generate macOS icon
+        run: |
+          mkdir -p icon.iconset build
+          sips -z 16 16     electron/logo.png --out icon.iconset/icon_16x16.png
+          sips -z 32 32     electron/logo.png --out icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     electron/logo.png --out icon.iconset/icon_32x32.png
+          sips -z 64 64     electron/logo.png --out icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   electron/logo.png --out icon.iconset/icon_128x128.png
+          sips -z 256 256   electron/logo.png --out icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   electron/logo.png --out icon.iconset/icon_256x256.png
+          sips -z 512 512   electron/logo.png --out icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   electron/logo.png --out icon.iconset/icon_512x512.png
+          sips -z 1024 1024 electron/logo.png --out icon.iconset/icon_512x512@2x.png
+          iconutil -c icns icon.iconset -o build/icon.icns
+
+      - name: Build frontend
+        run: npm run build
+
+      # No Apple Developer certificate is configured (CSC_LINK / CSC_KEY_PASSWORD secrets),
+      # so this produces an unsigned build — macOS Gatekeeper will warn on first open unless
+      # the user right-clicks > Open. Add those secrets later to sign + notarize for real
+      # distribution.
+      - name: Build macOS app
+        run: npx electron-builder --mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-host-form-mac
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error

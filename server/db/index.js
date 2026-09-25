@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = process.env.DATA_DIR || path.join(__dirname, "..", "data");
+// Exported so other modules that need a writable, per-install directory (e.g. server/tunnel's
+// cached cloudflared binary) land next to the sqlite file instead of computing their own copy of
+// this same DATA_DIR-or-fallback logic.
+export const dataDir = process.env.DATA_DIR || path.join(__dirname, "..", "data");
 if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 
 const dbPath = path.join(dataDir, "stonearch.sqlite");
@@ -173,11 +176,35 @@ ensureColumn("responses", "deadline_at", "TEXT");
 ensureColumn("responses", "edit_code", "TEXT");
 ensureColumn("sessions", "responses_editable", "INTEGER NOT NULL DEFAULT 0");
 
+// Null/0 = off. When set, a respondent who switches away from the answering tab and comes back
+// is held on a countdown overlay for this many seconds before the questions reappear — a
+// deterrent against looking things up elsewhere mid-quiz (see the respondent page's
+// visibilitychange handling). Like responses_editable, flippable anytime, not just while draft —
+// it only affects respondents from the moment it's turned on, nothing retroactive to enforce.
+ensureColumn("sessions", "refocus_lock_seconds", "INTEGER");
+
+// Off (0) unless the host turns it on: whether the respondent page tries to enter fullscreen the
+// moment a respondent starts answering (join, or reopening an edit). A manual "Fullscreen" button
+// is always offered on the respondent page regardless — this only controls the automatic attempt.
+ensureColumn("sessions", "fullscreen_enabled", "INTEGER NOT NULL DEFAULT 0");
+
+// Set the moment this respondent's tab is detected going hidden (see POST
+// /api/public/responses/:id/refocus-lock) to "now + the session's refocusLockSeconds", not when
+// they come back — so the lock survives a reload while away or right after returning instead of
+// resetting with the rest of the page's client-only state. Read back on every join/resume so the
+// countdown a reload would otherwise skip keeps counting down server-side regardless.
+ensureColumn("responses", "refocus_locked_until", "TEXT");
+
 // Bookkeeping for forms imported from the cloud server — null for locally-authored forms.
 // remote_version pins the local copy to the exact form_versions snapshot it was imported from,
 // so a later edit on the cloud server doesn't silently change a form already in offline use.
 ensureColumn("forms", "remote_form_id", "TEXT");
 ensureColumn("forms", "remote_version", "INTEGER");
+// When this form's content was last in step with the cloud copy — stamped on import and on every
+// publish (see server/forms/repository.js setRemoteInfo). A form whose updated_at is later than
+// this has local edits the cloud doesn't have yet, which is what drives the "save to cloud" prompt.
+ensureColumn("forms", "remote_saved_at", "TEXT");
+db.exec("UPDATE forms SET remote_saved_at = updated_at WHERE remote_form_id IS NOT NULL AND remote_saved_at IS NULL;");
 ensureColumn("forms", "owner_user_id", "TEXT");
 
 // UNIQUE (not just indexed): the app-level dedup check in importCentralFormLocally
@@ -200,6 +227,12 @@ db.exec(
 // find its way back to the source Drive file id later. Null for every other form.
 ensureColumn("forms", "google_form_id", "TEXT");
 
+// An optional decorative image shown across the top of the form, both in the builder and on the
+// respondent page — a data: URI, the same inline-base64 approach question images already use
+// (see ImageBlock.jsx), so it round-trips with the rest of the form on export/import with no
+// separate asset storage or upload endpoint.
+ensureColumn("forms", "banner_image", "TEXT");
+
 // Sync bookkeeping for responses collected under a cloud-linked form (see server/cloud/sync.js).
 // No separate outbox/queue table: these columns on the responses row itself ARE the queue —
 // "pending" rows are exactly the ones sync needs to upload, so there is only one place that can
@@ -216,6 +249,14 @@ ensureColumn("responses", "sync_status", "TEXT NOT NULL DEFAULT 'pending'");
 ensureColumn("responses", "synced_at", "TEXT");
 ensureColumn("responses", "retry_count", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("responses", "sync_error", "TEXT");
+
+// A response fetched from a real Google Form (see server/cloud/routes.js pullGoogleResponsesLocally)
+// keeps Google's own response id so it's never fetched twice, and so uploading it to the cloud later
+// can't duplicate a copy the cloud already has. Its sync_status starts as 'local' — a fourth state,
+// neither 'pending' nor 'failed', so it is NOT uploaded until the host chooses to save it to the
+// cloud (server/cloud/routes.js POST /google-forms/:id/save-to-cloud flips it to 'pending').
+ensureColumn("responses", "google_response_id", "TEXT");
+db.exec("CREATE INDEX IF NOT EXISTS idx_responses_google_response_id ON responses(form_id, google_response_id);");
 
 db.exec("CREATE INDEX IF NOT EXISTS idx_responses_sync_status ON responses(sync_status);");
 
@@ -235,6 +276,18 @@ db.exec(`
 // rejects any version < 1 as "invalid", and no amount of retrying ever changes that version.
 // Idempotent — matches nothing once every such row has been bumped once.
 db.exec(`UPDATE responses SET version = 1 WHERE status = 'submitted' AND version = 0;`);
+
+// SYNCED-/GOOGLE-/IMPORT- session codes (see server/sessions/repository.js) embed a slice of a
+// randomUUID, which is lowercase hex — but every respondent-facing lookup of a code uppercases it
+// first (see server/public/routes.js), the same as a real 6-character join code always is. A code
+// minted with lowercase hex in it could never actually be matched by a respondent typing or
+// following that exact link — reopening one of these sessions and sharing its link 404'd. Session
+// generation now always uppercases that slice; this backfills every row already created the old
+// way. Idempotent — UPPER() on an already-uppercase code is a no-op.
+db.exec(`
+  UPDATE sessions SET code = UPPER(code)
+  WHERE code LIKE 'SYNCED-%' OR code LIKE 'GOOGLE-%' OR code LIKE 'IMPORT-%';
+`);
 
 db.exec("CREATE INDEX IF NOT EXISTS idx_forms_subject_id ON forms(subject_id);");
 db.exec("CREATE INDEX IF NOT EXISTS idx_responses_edit_code ON responses(session_id, edit_code);");

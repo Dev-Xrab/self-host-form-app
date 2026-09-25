@@ -19,6 +19,7 @@ function buildPayload(response) {
     startedAt: response.startedAt,
     submittedAt: response.submittedAt,
     editCode: response.editCode,
+    googleResponseId: response.googleResponseId || undefined,
     answers: response.answers,
   };
 }
@@ -88,6 +89,7 @@ async function applyDownloadedChanges(changes) {
         version: change.version,
         formVersion: change.formVersion,
         deviceId: change.deviceId,
+        googleResponseId: payload.googleResponseId,
         answers: payload.answers,
       });
       if (result !== "skipped_stale") applied += 1;
@@ -213,6 +215,30 @@ async function doRunSync() {
   totals.incomplete = true;
   cloudRepo.setLastSyncedAt(new Date().toISOString());
   return totals;
+}
+
+// Downloads every response the cloud holds for ONE form, independent of (and without touching) the
+// global sync cursor. Used right after a form is imported from the cloud: a device whose cursor is
+// already past that form's responses — e.g. the form was deleted here and is now being imported
+// again — would otherwise never see them. Safe to repeat: applyRemoteResponse is version-gated.
+export async function downloadResponsesForForm(remoteFormId) {
+  let cursor = "0";
+  let applied = 0;
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const res = await cloudFetch("/api/sync", {
+      method: "POST",
+      body: JSON.stringify({ lastCursor: cursor, changes: [], formId: remoteFormId }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Download failed (${res.status})`);
+    }
+    const data = await res.json();
+    applied += (await applyDownloadedChanges(data.changes || [])).applied;
+    if (!data.hasMore) break;
+    cursor = String(data.nextCursor);
+  }
+  return applied;
 }
 
 // Cheap connectivity probe used by the sync status indicator — distinguishes "no network" /

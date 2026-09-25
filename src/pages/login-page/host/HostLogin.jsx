@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import useAuthStore, { useAuthActions } from "../../../../store/useAuthStore";
-import "./host-login.css";
+import Button from "../../../components/ui/Button";
+import HostSetup from "./HostSetup";
+import "../auth-page.css";
 import logo from "../../../../src/images/logo.png";
 
 export default function HostLogin() {
@@ -9,10 +11,18 @@ export default function HostLogin() {
   const { login } = useAuthActions();
   const isSubmitting = useAuthStore((s) => s.isSubmitting);
   const serverError = useAuthStore((s) => s.error);
+  const isChecking = useAuthStore((s) => s.isChecking);
+  const needsSetup = useAuthStore((s) => s.needsSetup);
 
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [fieldError, setFieldError] = useState(null);
+
+  // Wait for the initial /api/auth/me check (App.jsx's checkSession) before deciding which
+  // form to show — otherwise this would flash the login form for a moment on every fresh
+  // install, before flipping over to the setup screen once needsSetup comes back true.
+  if (isChecking) return <div className="auth-content" />;
+  if (needsSetup) return <HostSetup />;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -28,7 +38,7 @@ export default function HostLogin() {
   }
 
   return (
-    <div className="host-login-content">
+    <div className="auth-content">
       <img
         src={logo}
         alt="Host login illustration"
@@ -36,14 +46,14 @@ export default function HostLogin() {
         style={{ width: "50px", height: "50px", paddingBottom: "10px" }}
       />
       <h1>Log in as a Hoster</h1>
-      <p className="host-login-subtitle">
+      <p className="auth-subtitle">
         Manage your forms, sessions, and results.
       </p>
 
-      <form className="host-login-form" onSubmit={handleSubmit} noValidate>
-        <div className="host-login-field">
+      <form className="auth-form" onSubmit={handleSubmit} noValidate>
+        <div className="auth-field">
           <label htmlFor="host-password">Server password</label>
-          <div className="host-login-password-wrap">
+          <div className="auth-password-wrap">
             <input
               id="host-password"
               type={showPassword ? "text" : "password"}
@@ -57,28 +67,28 @@ export default function HostLogin() {
             />
             <button
               type="button"
-              className="host-login-toggle"
+              className="auth-toggle"
               onClick={() => setShowPassword((v) => !v)}
             >
               {showPassword ? "Hide" : "Show"}
             </button>
           </div>
-          {fieldError && <span className="host-login-error">{fieldError}</span>}
-          {!fieldError && serverError && <span className="host-login-error">{serverError}</span>}
+          {fieldError && <span className="auth-error">{fieldError}</span>}
+          {!fieldError && serverError && <span className="auth-error">{serverError}</span>}
         </div>
 
-        <div className="host-login-row">
-          <Link to="/host/recover" className="host-login-link">
+        <div className="auth-row">
+          <Link to="/host/recover" className="auth-link">
             Forgot password?
           </Link>
         </div>
 
-        <button type="submit" className="host-login-submit" disabled={isSubmitting}>
+        <Button type="submit" fullWidth disabled={isSubmitting}>
           {isSubmitting ? "Logging in…" : "Log in"}
-        </button>
+        </Button>
       </form>
 
-      <p className="host-login-footer">
+      <p className="auth-footer">
         Filling out a form instead?{" "}
         <Link to="/respondent/login">Continue as a Responder</Link>
       </p>

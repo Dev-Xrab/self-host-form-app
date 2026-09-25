@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import "./App.css";
 import { useAuthActions } from "../store/useAuthStore";
 import RequireAuth from "./features/auth/components/RequireAuth";
+import TitleBar from "./components/TitleBar/TitleBar";
 import RolePage from "./pages/role-page/RolePage";
 import WindowContainer from "./components/Window Container/WindowContainer";
 import FormPage from "./pages/form-page/FormPage";
@@ -17,7 +18,6 @@ import SubjectsPage from "./pages/dashboard-page/SubjectsPage";
 import SubjectDetailPage from "./pages/dashboard-page/SubjectDetailPage";
 import FormsPage from "./pages/dashboard-page/FormsPage";
 import BulkExportPage from "./pages/dashboard-page/BulkExportPage";
-import GradebookPage from "./pages/dashboard-page/GradebookPage";
 import SettingsPage from "./pages/dashboard-page/SettingsPage";
 import HostLogin from "./pages/login-page/host/HostLogin";
 import HostRecovery from "./pages/login-page/host/HostRecovery";
@@ -35,6 +35,7 @@ function App() {
   return (
     <>
       <BrowserRouter>
+        <TitleBar />
         <Routes>
           <Route
             path="/"
@@ -60,7 +61,6 @@ function App() {
             <Route path="subjects/:subjectId" element={<SubjectDetailPage />} />
             <Route path="forms" element={<FormsPage />} />
             <Route path="export" element={<BulkExportPage />} />
-            <Route path="gradebook" element={<GradebookPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
           <Route

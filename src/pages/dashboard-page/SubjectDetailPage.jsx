@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useForms } from "../../features/forms/hooks/useForms";
 import { formsApi } from "../../features/forms/services/formsApi";
+import { downloadFormAsJson } from "../../features/forms/utils/exportForm";
 import { useSubjects } from "../../features/subjects/hooks/useSubjects";
 import { subjectsApi } from "../../features/subjects/services/subjectsApi";
 import { Icons } from "./icons";
-import { Monogram } from "./Monogram";
+import FormCard from "./FormCard";
 import Dialog from "../../components/Dialog/Dialog";
+import EmptyState from "../../components/ui/EmptyState";
 import DeleteSubjectModal from "./DeleteSubjectModal";
 import ConfirmDialog from "../../components/Dialog/ConfirmDialog";
 
@@ -17,6 +19,8 @@ export default function SubjectDetailPage() {
   const navigate = useNavigate();
   const { subjects, refresh: refreshSubjects } = useSubjects();
   const { forms, loading, error, refresh: refreshForms } = useForms();
+
+  const [query, setQuery] = useState("");
 
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -31,8 +35,16 @@ export default function SubjectDetailPage() {
   const [showDeleteSubject, setShowDeleteSubject] = useState(false);
   const [deleteFormTarget, setDeleteFormTarget] = useState(null);
 
+  // Same "form only" vs "include responses" choice as the Forms page export button — kept in
+  // step so a form looks and behaves identically whichever grid it's opened from.
+  const [exportChoiceTarget, setExportChoiceTarget] = useState(null);
+  const [exportingId, setExportingId] = useState(null);
+  const [exportError, setExportError] = useState(null);
+
   const subject = subjects.find((s) => s.id === subjectId);
-  const subjectForms = forms.filter((f) => f.subjectId === subjectId);
+  const subjectForms = forms
+    .filter((f) => f.subjectId === subjectId)
+    .filter((f) => f.title.toLowerCase().includes(query.toLowerCase()));
 
   useEffect(() => {
     if (subject) setEditForm({ name: subject.name || "", code: subject.code || "" });
@@ -91,17 +103,35 @@ export default function SubjectDetailPage() {
     }
   };
 
+  const runExport = async (includeResponses) => {
+    const target = exportChoiceTarget;
+    setExportChoiceTarget(null);
+    setExportingId(target.id);
+    setExportError(null);
+    try {
+      const [full, responses] = await Promise.all([
+        formsApi.get(target.id),
+        includeResponses ? formsApi.responses(target.id) : Promise.resolve(undefined),
+      ]);
+      downloadFormAsJson(full, { responses });
+    } catch (err) {
+      setExportError(err.message);
+    } finally {
+      setExportingId(null);
+    }
+  };
+
   if (!loading && !subject) {
     return (
       <>
         <header className="dash-header">
           <Link to="/dashboard/subjects" className="dash-back-link">
             <Icons.arrowLeft />
-            Back to Subjects
+            Back to Folders
           </Link>
         </header>
         <div className="dash-content">
-          <p className="dash-empty">This subject couldn't be found.</p>
+          <EmptyState description="This folder couldn't be found." />
         </div>
       </>
     );
@@ -112,12 +142,15 @@ export default function SubjectDetailPage() {
       <header className="dash-header">
         <Link to="/dashboard/subjects" className="dash-back-link">
           <Icons.arrowLeft />
-          Back to Subjects
+          Back to Folders
         </Link>
 
         <div className="dash-header-row">
           <div>
-            <span className="dash-eyebrow">{subject?.code || "Subject"}</span>
+            <span className="dash-eyebrow">
+              <Icons.folder className="dash-icon" style={{ width: 13, height: 13, marginRight: 4, verticalAlign: -2 }} />
+              {subject?.code || "Folder"}
+            </span>
             <h1 className="dash-title">{subject?.name}</h1>
             <p className="dash-subtitle">
               {subjectForms.length} form{subjectForms.length === 1 ? "" : "s"}
@@ -127,7 +160,7 @@ export default function SubjectDetailPage() {
           <div className="dash-header-actions">
             <button type="button" className="dash-ghost-btn" onClick={() => setShowEditModal(true)}>
               <Icons.pencil />
-              Edit Subject
+              Rename
             </button>
             {!subject?.isDefault && (
               <button
@@ -136,7 +169,7 @@ export default function SubjectDetailPage() {
                 onClick={() => setShowDeleteSubject(true)}
               >
                 <Icons.trash />
-                Delete Subject
+                Delete Folder
               </button>
             )}
             <button type="button" className="dash-primary-btn" onClick={() => setShowModal(true)}>
@@ -148,43 +181,62 @@ export default function SubjectDetailPage() {
       </header>
 
       <div className="dash-content">
+        {subjectForms.length > 0 && (
+          <div className="dash-search dash-page-search">
+            <Icons.search className="dash-search-icon" />
+            <input
+              type="text"
+              placeholder="Search forms in this folder..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        )}
+
+        {exportError && <p className="dash-form-error">{exportError}</p>}
+
         {loading ? (
-          <p className="dash-empty">Loading forms…</p>
+          <EmptyState description="Loading forms…" />
         ) : error ? (
-          <p className="dash-empty">Couldn't load forms — {error}</p>
+          <EmptyState description={`Couldn't load forms — ${error}`} />
         ) : subjectForms.length === 0 ? (
-          <p className="dash-empty">No forms under this subject yet.</p>
+          <EmptyState description={query ? `No forms match "${query}".` : "No forms in this folder yet."} />
         ) : (
-          <div className="dash-card-grid">
+          <div className="form-grid">
             {subjectForms.map((f) => (
-              <Link
-                className="dash-item-card dash-item-card-link dash-item-card-removable"
+              <FormCard
                 key={f.id}
-                to={`/forms/${f.id}`}
-              >
-                <button
-                  type="button"
-                  className="dash-item-card-remove"
-                  title="Delete form"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setDeleteFormTarget(f);
-                  }}
-                >
-                  <Icons.close />
-                </button>
-                <Monogram label={<Icons.fileText />} />
-                <span className="dash-item-title">{f.title || "Untitled form"}</span>
-                <span className="dash-item-divider" />
-                <span className="dash-item-meta">
-                  {f.questionCount} question{f.questionCount === 1 ? "" : "s"}
-                </span>
-              </Link>
+                form={f}
+                // Publishing/Google-sync live on the Forms page — this view keeps the same card
+                // look (title, status, stats, footer) without duplicating that machinery here.
+                cloudConnected={false}
+                exporting={exportingId === f.id}
+                onExport={setExportChoiceTarget}
+                onDelete={setDeleteFormTarget}
+              />
             ))}
           </div>
         )}
       </div>
+
+      {exportChoiceTarget && (
+        <Dialog title="Export form" onClose={() => setExportChoiceTarget(null)}>
+          <div className="dash-form">
+            <p className="dash-form-label">
+              Include the responses collected for "{exportChoiceTarget.title || "Untitled form"}" in the file?
+              Importing it later will bring them back along with the form.
+            </p>
+            <div className="dash-modal-footer">
+              <button type="button" className="dash-ghost-btn" onClick={() => runExport(false)}>
+                Form only
+              </button>
+              <button type="button" className="dash-primary-btn" onClick={() => runExport(true)}>
+                Include responses
+              </button>
+            </div>
+          </div>
+        </Dialog>
+      )}
 
       {showModal && (
         <Dialog title="Add Form" onClose={() => setShowModal(false)}>
@@ -227,10 +279,10 @@ export default function SubjectDetailPage() {
       )}
 
       {showEditModal && (
-        <Dialog title="Edit Subject" onClose={() => setShowEditModal(false)}>
+        <Dialog title="Rename Folder" onClose={() => setShowEditModal(false)}>
           <form className="dash-form" onSubmit={handleEditSubmit}>
             <label className="dash-form-field">
-              <span className="dash-form-label">Subject name</span>
+              <span className="dash-form-label">Folder name</span>
               <input
                 type="text"
                 className="dash-form-input"
@@ -242,7 +294,7 @@ export default function SubjectDetailPage() {
             </label>
 
             <label className="dash-form-field">
-              <span className="dash-form-label">Subject code</span>
+              <span className="dash-form-label">Folder code (optional)</span>
               <input
                 type="text"
                 className="dash-form-input"

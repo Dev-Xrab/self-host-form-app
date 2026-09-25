@@ -1,4 +1,5 @@
 import express from "express";
+import helmet from "helmet";
 import path from "node:path";
 import { networkInterfaces } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -10,30 +11,81 @@ import { publicRouter } from "./public/routes.js";
 import { authRouter } from "./auth/routes.js";
 import { maintenanceRouter } from "./maintenance/routes.js";
 import { requireAuth } from "./auth/middleware.js";
-import { ensureHostPassword } from "./auth/repository.js";
 import { ensureDefaultSubject } from "./subjects/repository.js";
 import { backfillFormsWithoutSubject } from "./forms/repository.js";
 import { cloudRouter } from "./cloud/routes.js";
 import { ensureDeviceId } from "./cloud/repository.js";
+import { tunnelRouter } from "./tunnel/routes.js";
+import { stopTunnel } from "./tunnel/service.js";
+import { requireSameOrigin } from "./security/network.js";
+import { apiLimiter, importLimiter, submitLimiter } from "./security/rateLimits.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 5174;
-
-ensureHostPassword();
-if (!process.env.HOST_PASSWORD) {
-  console.log("\n============================================");
-  console.log(" Host password: \"password\" (unless already changed)");
-  console.log(" You'll be reminded to change it after logging in.");
-  console.log(" Set HOST_PASSWORD in your environment to choose your own.");
-  console.log("============================================\n");
-}
 
 ensureDefaultSubject();
 backfillFormsWithoutSubject();
 ensureDeviceId();
 
 const app = express();
-app.use(express.json({ limit: "10mb" }));
+
+// Security headers. The CSP is written for this app's actual needs: everything is served from
+// this origin, images/files are inline data:/blob: URIs (question images, banners, respondent
+// uploads, QR codes, exports) or remote question-image URLs, and the PDF preview is a data: iframe.
+// upgrade-insecure-requests and HSTS are deliberately off — the app is normally served over plain
+// HTTP on the LAN, where forcing HTTPS would break every subresource.
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "blob:", "https:", "http:"],
+        mediaSrc: ["'self'", "data:", "blob:"],
+        frameSrc: ["'self'", "data:", "blob:"],
+        fontSrc: ["'self'", "data:"],
+        connectSrc: ["'self'"],
+        workerSrc: ["'self'", "blob:"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    strictTransportSecurity: false,
+    // Opening the OAuth flow in the OS browser from the Electron window uses window.open.
+    crossOriginOpenerPolicy: false,
+  })
+);
+
+app.use("/api", apiLimiter);
+
+// Body size limits: small by default so no client can make the server buffer megabytes of JSON
+// on an arbitrary route. Only the routes that legitimately carry inline images/files get more —
+// a form (question images, banner) and a respondent's submission (file-upload answers, each
+// separately capped at 5MB in server/security/uploads.js).
+// The rate limiter / auth check runs *before* the large parser, so an unauthenticated or
+// throttled client is turned away without the server ever buffering its body.
+const largeJson = express.json({ limit: "12mb" });
+app.post("/api/public/responses/:id/submit", submitLimiter, largeJson);
+app.use("/api/forms", requireAuth, largeJson);
+app.use(express.json({ limit: "256kb" }));
+
+// Every API response is dynamic (session status, respondent counts, toggle state, ...) and must
+// never be served stale — a plain `serverProcess.kill()`-free browser cache would be one thing,
+// but a Cloudflare Quick Tunnel (see server/tunnel/) routes requests through Cloudflare's edge
+// network, which applies its own default heuristic caching to anything that doesn't explicitly
+// say not to. Without this, a host toggling a session setting (or ending it, or a respondent
+// joining) could appear not to "take" when viewed through the public tunnel link even though the
+// database updated correctly — the exact same request over the LAN address never passed through
+// that edge, so it wouldn't show the same staleness. Scoped to /api so the static frontend bundle
+// below keeps its normal (helpful) caching.
+app.use("/api", (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });
@@ -55,7 +107,7 @@ function rankAdapter(name) {
 // The Electron window always loads http://localhost, so window.location.origin can't tell
 // the host what address to share with students on the LAN. Report the machine's actual
 // LAN IPv4 addresses so the dashboard can show a reachable URL instead of "localhost".
-app.get("/api/network-info", (req, res) => {
+app.get("/api/network-info", requireAuth, (req, res) => {
   const addresses = Object.entries(networkInterfaces())
     .flatMap(([name, ifaces]) => ifaces.map((iface) => ({ name, ...iface })))
     .filter((iface) => iface.family === "IPv4" && !iface.internal)
@@ -65,19 +117,25 @@ app.get("/api/network-info", (req, res) => {
   res.json({ port: PORT, addresses });
 });
 
+// Respondents: no cookie, no session — every route in here does its own ownership checks.
 app.use("/api/public", publicRouter);
+// Everything below is (or leads to) the host's cookie-authenticated session, so cross-site
+// state-changing requests are refused before any route runs — see requireSameOrigin.
+app.use("/api", requireSameOrigin);
 app.use("/api/auth", authRouter);
 app.use("/api/forms/:formId/sessions", requireAuth, formSessionsRouter);
 app.use("/api/forms/:formId/responses", requireAuth, formResponsesRouter);
 app.use("/api/sessions", requireAuth, sessionsRouter);
 app.use("/api/subjects", requireAuth, subjectsRouter);
 app.use("/api/roster", requireAuth, rosterRouter);
+app.post("/api/forms/import", requireAuth, importLimiter);
 app.use("/api/forms", requireAuth, formsRouter);
 app.use("/api/maintenance", requireAuth, maintenanceRouter);
 // Not wrapped in requireAuth here: /auth/start and /auth/callback must stay reachable from the
 // OS's default browser mid-OAuth-flow, which carries no session cookie for this origin. Every
 // other route inside cloudRouter applies requireAuth itself — see server/cloud/routes.js.
 app.use("/api/cloud", cloudRouter);
+app.use("/api/tunnel", requireAuth, tunnelRouter);
 
 // Serve the built frontend in production so the whole app is one process/port.
 const distDir = path.join(__dirname, "..", "dist");
@@ -89,6 +147,14 @@ app.get(/^(?!\/api).*/, (req, res, next) => {
 });
 
 app.use((err, req, res, _next) => {
+  // Body-parser rejections (malformed JSON, oversized body) are the client's fault — say so
+  // without echoing internals, instead of reporting them as a server crash.
+  if (err.type === "entity.too.large") {
+    return res.status(413).json({ error: "That request is too large." });
+  }
+  if (err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: "Malformed request." });
+  }
   console.error(err);
   res.status(500).json({ error: "Internal server error" });
 });
@@ -96,3 +162,13 @@ app.use((err, req, res, _next) => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Self Host Form server listening on http://localhost:${PORT}`);
 });
+
+// Covers Ctrl+C and `systemctl stop` for anyone running this directly (not just the Electron
+// build) — without this, a live Cloudflare tunnel child process would be orphaned on shutdown
+// instead of being told to disconnect.
+function shutdown() {
+  stopTunnel();
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

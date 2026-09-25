@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef } from "react";
 import { Icons } from "../../pages/dashboard-page/icons";
+import { useBodyScrollLock } from "../../hooks/useBodyScrollLock";
 import "./Dialog.css";
 
 const FOCUSABLE_SELECTOR =
@@ -11,6 +12,10 @@ const FOCUSABLE_SELECTOR =
 export default function Dialog({ title, onClose, children, headerActions, className = "" }) {
   const dialogRef = useRef(null);
   const titleId = useId();
+
+  // The overlay already blocks clicks to the page behind it; this stops the page from still
+  // scrolling underneath a wheel/trackpad gesture while the dialog is open.
+  useBodyScrollLock(true);
 
   // Callers often pass a fresh onClose function every render (e.g. one that branches on other
   // state, like closing a nested lightbox first). Reading it through a ref keeps the mount effect

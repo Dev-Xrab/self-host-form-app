@@ -4,8 +4,10 @@ import useAuthStore, { useAuthActions } from "../../../store/useAuthStore";
 import { authApi } from "../../features/auth/services/authApi";
 import { settingsApi } from "../../features/settings/services/settingsApi";
 import { useCloudAccount } from "../../features/cloud/hooks/useCloudAccount";
+import { useTunnel } from "../../features/tunnel/hooks/useTunnel";
 import Toggle from "../../components/ui/Toggle";
 import { Icons } from "./icons";
+import { useServerOrigin } from "./useServerOrigin";
 import Dialog from "../../components/Dialog/Dialog";
 import PageHeader from "./PageHeader";
 
@@ -20,18 +22,17 @@ const emptyRecoveryForm = { currentPassword: "", question: "", answer: "" };
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  // See DashboardHome's server-card for why this reads window.location.origin instead of
-  // a hardcoded address: the same Express process serves this page and the students hitting
-  // it, so the page's own origin is always the correct one to share, whatever host/port that is.
-  const [serverAddress] = useState(window.location.origin);
+  // The address students should open — the machine's LAN address, not this window's own origin
+  // (the desktop app always loads http://localhost, which nobody else can reach). Same hook the
+  // Dashboard's server card and session pages use, so all three always show the same link.
+  const serverAddress = useServerOrigin();
   const [copied, setCopied] = useState(false);
   const [toggles, setToggles] = useState(
     Object.fromEntries(TOGGLES.map((t) => [t.id, t.defaultChecked]))
   );
 
-  const isDefaultPassword = useAuthStore((s) => s.isDefaultPassword);
   const hasRecoveryQuestion = useAuthStore((s) => s.hasRecoveryQuestion);
-  const { passwordChanged, recoveryQuestionSet } = useAuthActions();
+  const { recoveryQuestionSet } = useAuthActions();
   const [passwordForm, setPasswordForm] = useState(emptyPasswordForm);
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [passwordError, setPasswordError] = useState(null);
@@ -51,6 +52,10 @@ export default function SettingsPage() {
   const { account: cloudAccount, connected: cloudConnected, loading: cloudLoading, login: cloudLogin, logout: cloudLogout } = useCloudAccount();
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudError, setCloudError] = useState(null);
+
+  const tunnel = useTunnel();
+  const [tunnelBusy, setTunnelBusy] = useState(false);
+  const [tunnelCopied, setTunnelCopied] = useState(false);
 
   const handleCloudLogin = async () => {
     setCloudBusy(true);
@@ -74,6 +79,30 @@ export default function SettingsPage() {
     } finally {
       setCloudBusy(false);
     }
+  };
+
+  const handleStartTunnel = async () => {
+    setTunnelBusy(true);
+    try {
+      await tunnel.start();
+    } finally {
+      setTunnelBusy(false);
+    }
+  };
+
+  const handleStopTunnel = async () => {
+    setTunnelBusy(true);
+    try {
+      await tunnel.stop();
+    } finally {
+      setTunnelBusy(false);
+    }
+  };
+
+  const handleCopyTunnel = () => {
+    navigator.clipboard?.writeText(tunnel.url).catch(() => {});
+    setTunnelCopied(true);
+    setTimeout(() => setTunnelCopied(false), 1500);
   };
 
   const closeClearConfirm = () => {
@@ -117,6 +146,10 @@ export default function SettingsPage() {
       setPasswordError("Current and new password are both required.");
       return;
     }
+    if (passwordForm.newPassword.length < 8) {
+      setPasswordError("New password must be at least 8 characters.");
+      return;
+    }
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
       setPasswordError("New password and confirmation don't match.");
       return;
@@ -125,7 +158,6 @@ export default function SettingsPage() {
     setPasswordSaving(true);
     try {
       await authApi.changePassword(passwordForm.oldPassword, passwordForm.newPassword);
-      passwordChanged();
       setPasswordForm(emptyPasswordForm);
       setPasswordSuccess(true);
     } catch (err) {
@@ -203,6 +235,56 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+
+          <div className="dash-card dash-settings-card">
+            <div className="dash-settings-row">
+              <div>
+                <span className="dash-settings-row-label">Remote access (Internet)</span>
+                <span className="dash-settings-row-desc">
+                  Create a temporary public link so students can join from outside this network —
+                  no router setup, no account required. Powered by a Cloudflare Quick Tunnel: the
+                  link changes every time you start it, and stops working as soon as you stop it
+                  or close the app.
+                </span>
+              </div>
+
+              {tunnel.status === "connected" ? (
+                <button
+                  type="button"
+                  className="dash-ghost-btn dash-danger-btn"
+                  disabled={tunnelBusy}
+                  onClick={handleStopTunnel}
+                >
+                  {tunnelBusy ? "Stopping…" : "Stop"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="dash-primary-btn"
+                  disabled={tunnelBusy || tunnel.status === "installing" || tunnel.status === "starting"}
+                  onClick={handleStartTunnel}
+                >
+                  <Icons.globe />
+                  {tunnel.status === "installing"
+                    ? "Setting up…"
+                    : tunnel.status === "starting"
+                      ? "Connecting…"
+                      : "Start remote access"}
+                </button>
+              )}
+            </div>
+
+            {tunnel.status === "connected" && tunnel.url && (
+              <div className="server-address-row dash-settings-address">
+                <span className="server-address">{tunnel.url}</span>
+                <button type="button" className="server-copy-btn" onClick={handleCopyTunnel} title="Copy link">
+                  {tunnelCopied ? <Icons.check /> : <Icons.copy />}
+                </button>
+              </div>
+            )}
+
+            {tunnel.status === "error" && tunnel.error && <p className="dash-form-error">{tunnel.error}</p>}
+          </div>
         </section>
 
         <section className="dash-section">
@@ -272,12 +354,6 @@ export default function SettingsPage() {
           <h2 className="dash-settings-heading">Security</h2>
 
           <div className="dash-card dash-settings-card">
-            {isDefaultPassword && (
-              <p className="dash-settings-note dash-settings-note-warn">
-                You're still using the default password. Set your own below.
-              </p>
-            )}
-
             <form className="dash-form dash-password-form" onSubmit={handleChangePassword}>
               <label className="dash-form-field">
                 <span className="dash-form-label">Current password</span>

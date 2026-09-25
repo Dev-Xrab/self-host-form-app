@@ -1,5 +1,11 @@
 const CHOICE_TYPES = new Set(["multiple_choice", "dropdown"]);
 
+// Only an inline data: URI is ever handed to a page as a file to show/download — a plain URL
+// (possible in responses stored before uploads were validated server-side) would otherwise make
+// the host's browser fetch an address a respondent chose.
+const fileUrlOf = (question, value) =>
+  question.type === "file_upload" && typeof value === "string" && value.startsWith("data:") ? value : null;
+
 const normalize = (s) => String(s ?? "").trim().toLowerCase();
 const pointsOf = (question) => Math.max(0, Number(question.points) || 0) || 1;
 
@@ -139,7 +145,7 @@ export function buildAnswerReview(questions, answers) {
         title: q.title,
         questionImageUrl: q.imageUrl || null,
         submittedAnswer: submittedAnswerText(q, value),
-        fileUrl: q.type === "file_upload" && value ? value : null,
+        fileUrl: fileUrlOf(q, value),
         gradable,
         correct: gradable ? isCorrect(q, value) : null,
         correctAnswer: gradable ? correctAnswerText(q) : null,
@@ -182,7 +188,7 @@ export function buildFullBreakdown(questions, answers) {
         submittedAnswer: submittedAnswerText(q, value),
         // Raw data: URI so the host can actually view/download what was uploaded —
         // submittedAnswer above stays a human label since the full value is too large for it.
-        fileUrl: q.type === "file_upload" && value ? value : null,
+        fileUrl: fileUrlOf(q, value),
         correctAnswer: gradable ? correctAnswerText(q) : null,
         gradable,
         correct: gradable ? isCorrect(q, answers[q.id]) : null,

@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { addGridSheet, triggerDownload } from "../../sessions/utils/export";
-import { aggregateQuestion } from "./responseAnalytics";
+import { aggregateQuestion, formatPercent } from "./responseAnalytics";
 
 // One row per respondent, one column per answerable question — mirrors the on-screen "By
 // Respondent" table but with every answer spelled out instead of just score/status. A question a
@@ -61,7 +61,7 @@ function buildQuestionStatisticsGrid(form, responses) {
             row.rowLabel,
             e.label,
             e.count,
-            `${Math.round((e.count / row.total) * 100)}%`,
+            formatPercent(e.count, row.total),
             "",
           ]);
         });
@@ -81,7 +81,7 @@ function buildQuestionStatisticsGrid(form, responses) {
           "",
           e.label,
           e.count,
-          result.total ? `${Math.round((e.count / result.total) * 100)}%` : "0%",
+          formatPercent(e.count, result.total),
           stats,
         ]);
       });

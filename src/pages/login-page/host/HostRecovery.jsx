@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { authApi } from "../../../features/auth/services/authApi";
-import "./host-login.css";
+import Button from "../../../components/ui/Button";
+import "../auth-page.css";
 
 export default function HostRecovery() {
   const navigate = useNavigate();
@@ -23,7 +24,8 @@ export default function HostRecovery() {
         setQuestion(question);
         setStatus(question ? "ready" : "unavailable");
       })
-      .catch(() => setStatus("unavailable"));
+      // 403: recovery is only offered on the computer running the server, never over the network.
+      .catch((err) => setStatus(err.status === 403 ? "local-only" : "unavailable"));
   }, []);
 
   async function handleSubmit(e) {
@@ -32,6 +34,10 @@ export default function HostRecovery() {
 
     if (!answer.trim() || !newPassword) {
       setFieldError("Answer and new password are both required.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setFieldError("New password must be at least 8 characters.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -52,19 +58,34 @@ export default function HostRecovery() {
   }
 
   if (status === "loading") {
-    return <div className="host-login-content" />;
+    return <div className="auth-content" />;
+  }
+
+  if (status === "local-only") {
+    return (
+      <div className="auth-content">
+        <h1>Password recovery</h1>
+        <p className="auth-subtitle">
+          For security, password recovery only works on the computer running Self Host Form.
+          Open the app there to reset your password.
+        </p>
+        <p className="auth-footer">
+          <Link to="/host/login">← Back to login</Link>
+        </p>
+      </div>
+    );
   }
 
   if (status === "unavailable") {
     return (
-      <div className="host-login-content">
+      <div className="auth-content">
         <h1>Password recovery</h1>
-        <p className="host-login-subtitle">
+        <p className="auth-subtitle">
           No recovery question has been set up on this server, so it can't verify who you are.
           Ask whoever administers this server to reset it directly, or set one up under
           Settings → Security once logged back in.
         </p>
-        <p className="host-login-footer">
+        <p className="auth-footer">
           <Link to="/host/login">← Back to login</Link>
         </p>
       </div>
@@ -73,25 +94,25 @@ export default function HostRecovery() {
 
   if (done) {
     return (
-      <div className="host-login-content">
+      <div className="auth-content">
         <h1>Password reset</h1>
-        <p className="host-login-subtitle">
+        <p className="auth-subtitle">
           Your password has been changed. Log in with your new password.
         </p>
-        <button type="button" className="host-login-submit" onClick={() => navigate("/host/login")}>
+        <Button type="button" fullWidth onClick={() => navigate("/host/login")}>
           Go to login
-        </button>
+        </Button>
       </div>
     );
   }
 
   return (
-    <div className="host-login-content">
+    <div className="auth-content">
       <h1>Password recovery</h1>
-      <p className="host-login-subtitle">Answer your recovery question to set a new password.</p>
+      <p className="auth-subtitle">Answer your recovery question to set a new password.</p>
 
-      <form className="host-login-form" onSubmit={handleSubmit} noValidate>
-        <div className="host-login-field">
+      <form className="auth-form" onSubmit={handleSubmit} noValidate>
+        <div className="auth-field">
           <label htmlFor="recovery-question">{question}</label>
           <input
             id="recovery-question"
@@ -104,7 +125,7 @@ export default function HostRecovery() {
           />
         </div>
 
-        <div className="host-login-field">
+        <div className="auth-field">
           <label htmlFor="recovery-new-password">New password</label>
           <input
             id="recovery-new-password"
@@ -116,7 +137,7 @@ export default function HostRecovery() {
           />
         </div>
 
-        <div className="host-login-field">
+        <div className="auth-field">
           <label htmlFor="recovery-confirm-password">Confirm new password</label>
           <input
             id="recovery-confirm-password"
@@ -128,15 +149,15 @@ export default function HostRecovery() {
           />
         </div>
 
-        {fieldError && <span className="host-login-error">{fieldError}</span>}
-        {!fieldError && serverError && <span className="host-login-error">{serverError}</span>}
+        {fieldError && <span className="auth-error">{fieldError}</span>}
+        {!fieldError && serverError && <span className="auth-error">{serverError}</span>}
 
-        <button type="submit" className="host-login-submit" disabled={submitting}>
+        <Button type="submit" fullWidth disabled={submitting}>
           {submitting ? "Resetting…" : "Reset password"}
-        </button>
+        </Button>
       </form>
 
-      <p className="host-login-footer">
+      <p className="auth-footer">
         <Link to="/host/login">← Back to login</Link>
       </p>
     </div>

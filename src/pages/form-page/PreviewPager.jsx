@@ -13,6 +13,7 @@ import "./preview-pager.css";
 export default function PreviewPager() {
   const formTitle = useFormStore((s) => s.formTitle);
   const formDescription = useFormStore((s) => s.formDescription);
+  const bannerImage = useFormStore((s) => s.bannerImage);
   const questions = useFormStore((s) => s.questions);
 
   const pages = useMemo(() => groupIntoPages(questions), [questions]);
@@ -40,6 +41,7 @@ export default function PreviewPager() {
         onSubmit={() => {}}
         formTitle={formTitle}
         formDescription={formDescription}
+        bannerImage={bannerImage}
       />
     </div>
   );

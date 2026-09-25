@@ -21,6 +21,7 @@ export default function QuestionPager({
   submitLabel = "Submit",
   formTitle,
   formDescription,
+  bannerImage = null,
   headerExtra = null,
   footerNotice = null,
 }) {
@@ -53,6 +54,12 @@ export default function QuestionPager({
           <span className="qp-progress-label">
             Page {currentPageIndex + 1} of {pages.length}
           </span>
+        </div>
+      )}
+
+      {currentPageIndex === 0 && bannerImage && (
+        <div className="qp-banner">
+          <img src={bannerImage} alt="" />
         </div>
       )}
 

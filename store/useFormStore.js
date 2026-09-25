@@ -38,6 +38,8 @@ const DEFAULT_FORM_SETTINGS = {
   allowMultipleResponses: false,
   showScoreImmediately: true,
   revealCorrectAnswers: false,
+  blurOnDisconnect: false,
+  restrictCopying: false,
 };
 
 const useFormStore = create((set, get) => ({
@@ -47,11 +49,14 @@ const useFormStore = create((set, get) => ({
   mode: "edit",
   formTitle: "",
   formDescription: "",
+  bannerImage: null,
   subjectId: null,
   formSettings: DEFAULT_FORM_SETTINGS,
   saveStatus: "idle", // idle | saving | saved | error
   saveError: null,
   recalculatedResponses: 0,
+  // True when this form is linked to the cloud and has edits the cloud copy doesn't have yet.
+  cloudUnsaved: false,
 
   // 2. Grouped Actions (Cleaner to import and call in components)
   actions: {
@@ -60,6 +65,7 @@ const useFormStore = create((set, get) => ({
         formId: form.id,
         formTitle: form.title,
         formDescription: form.description,
+        bannerImage: form.bannerImage || null,
         subjectId: form.subjectId ?? null,
         formSettings: { ...DEFAULT_FORM_SETTINGS, ...form.settings },
         // A question a Google structural sync marked removed (see server/forms/questionDiff.js)
@@ -71,7 +77,10 @@ const useFormStore = create((set, get) => ({
         saveStatus: "idle",
         saveError: null,
         recalculatedResponses: 0,
+        cloudUnsaved: !!form.hasUnsavedCloudChanges,
       }),
+
+    setCloudUnsaved: (cloudUnsaved) => set({ cloudUnsaved }),
 
     setSubjectId: (subjectId) => {
       if (get().mode === "view") return;
@@ -79,18 +88,23 @@ const useFormStore = create((set, get) => ({
     },
 
     saveForm: async () => {
-      const { formId, formTitle, formDescription, formSettings, questions, subjectId, mode } = get();
+      const { formId, formTitle, formDescription, bannerImage, formSettings, questions, subjectId, mode } = get();
       if (!formId || mode === "view") return;
       set({ saveStatus: "saving", saveError: null });
       try {
         const saved = await formsApi.update(formId, {
           title: formTitle,
           description: formDescription,
+          bannerImage,
           settings: formSettings,
           questions,
           subjectId,
         });
-        set({ saveStatus: "saved", recalculatedResponses: saved.recalculatedResponses || 0 });
+        set({
+          saveStatus: "saved",
+          recalculatedResponses: saved.recalculatedResponses || 0,
+          cloudUnsaved: !!saved.hasUnsavedCloudChanges,
+        });
       } catch (err) {
         set({ saveStatus: "error", saveError: err.message });
       }
@@ -397,6 +411,14 @@ const useFormStore = create((set, get) => ({
     setFormDescription: (formDescription) => {
       if (get().mode === "view") return;
       set({ formDescription });
+    },
+
+    // Local-only until the next Save, same as everything else here (and like a question's own
+    // image — see ImageBlock.jsx) — no separate upload endpoint, just a data: URI riding along
+    // with the rest of the form.
+    setBannerImage: (bannerImage) => {
+      if (get().mode === "view") return;
+      set({ bannerImage });
     },
 
     updateFormSettings: (patch) => {

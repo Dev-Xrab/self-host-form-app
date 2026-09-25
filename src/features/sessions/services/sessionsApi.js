@@ -30,6 +30,11 @@ export const sessionsApi = {
   update: (id, data) => request(`${BASE}/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   setEditable: (id, editable) =>
     request(`${BASE}/${id}/editable`, { method: "POST", body: JSON.stringify({ editable }) }),
+  // `seconds` null turns the tab-refocus countdown off.
+  setRefocusLock: (id, seconds) =>
+    request(`${BASE}/${id}/refocus-lock`, { method: "POST", body: JSON.stringify({ seconds }) }),
+  setFullscreenEnabled: (id, enabled) =>
+    request(`${BASE}/${id}/fullscreen`, { method: "POST", body: JSON.stringify({ enabled }) }),
   start: (id) => request(`${BASE}/${id}/start`, { method: "POST" }),
   end: (id) => request(`${BASE}/${id}/end`, { method: "POST" }),
   reopen: (id) => request(`${BASE}/${id}/reopen`, { method: "POST" }),

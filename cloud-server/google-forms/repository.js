@@ -59,6 +59,7 @@ export async function importResponsesForForm(ownerId, formId, googleFormId, ques
     const responseId = newId();
     const payload = {
       respondentName: response.respondentName,
+      googleResponseId: response.googleResponseId,
       score: null,
       maxScore: null,
       startedAt: response.startedAt,
@@ -92,4 +93,20 @@ export async function importResponsesForForm(ownerId, formId, googleFormId, ques
   }
 
   return { importedCount, skippedExistingCount: rawResponses.length - newRaw.length };
+}
+
+// Read-only counterpart of importResponsesForForm: fetches the live Google Form's responses and
+// returns the ones this account's cloud copy doesn't hold yet, translated onto the app's answer
+// shape, without writing anything. The local device stores them itself and only uploads them if the
+// host chooses to save them to the cloud (see server/cloud/routes.js).
+export async function listNewResponsesForForm(ownerId, formId, googleFormId, questions) {
+  const [rawResponses, alreadyImported] = await Promise.all([
+    listGoogleFormResponses(ownerId, googleFormId),
+    alreadyImportedResponseIds(formId),
+  ]);
+  const newRaw = rawResponses.filter((r) => !alreadyImported.has(r.responseId));
+  return {
+    responses: translateGoogleFormResponses(questions, newRaw),
+    skippedExistingCount: rawResponses.length - newRaw.length,
+  };
 }

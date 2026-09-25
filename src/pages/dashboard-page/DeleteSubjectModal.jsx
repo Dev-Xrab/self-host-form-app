@@ -33,10 +33,10 @@ export default function DeleteSubjectModal({ subject, onCancel, onConfirm }) {
   };
 
   return (
-    <Dialog title="Delete Subject" onClose={onCancel}>
+    <Dialog title="Delete Folder" onClose={onCancel}>
       <div className="dash-form delete-subject-form">
         <p className="dash-form-label">
-          Delete "{subject.name}"{subject.formCount > 0 && ` and its ${subject.formCount} form${subject.formCount === 1 ? "" : "s"}`}?
+          Delete the "{subject.name}" folder{subject.formCount > 0 && ` and its ${subject.formCount} form${subject.formCount === 1 ? "" : "s"}`}?
         </p>
 
         {subject.formCount > 0 && (
@@ -84,7 +84,7 @@ export default function DeleteSubjectModal({ subject, onCancel, onConfirm }) {
             onClick={handleConfirm}
             disabled={secondsLeft > 0 || deleting}
           >
-            {deleting ? "Deleting…" : secondsLeft > 0 ? `Delete Subject (${secondsLeft})` : "Delete Subject"}
+            {deleting ? "Deleting…" : secondsLeft > 0 ? `Delete Folder (${secondsLeft})` : "Delete Folder"}
           </button>
         </div>
       </div>

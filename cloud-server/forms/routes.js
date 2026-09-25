@@ -40,6 +40,14 @@ function validateFormBody(body) {
 
 export const formsRouter = Router();
 
+// Form ids are uuid columns — reject anything else as "not found" instead of letting Postgres
+// throw an invalid-input error (a 500) for it.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+formsRouter.param("id", (req, res, next, id) => {
+  if (!UUID_PATTERN.test(id)) return res.status(404).json({ error: "Form not found." });
+  next();
+});
+
 // req.userId comes only from the verified bearer token (see auth/middleware.js) — every route
 // below scopes its query to that id, so one account can never list, read, or publish into
 // another account's forms no matter what id shows up in the request body/URL.

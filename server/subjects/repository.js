@@ -51,7 +51,7 @@ export function createSubject({ name, code = "" }) {
 }
 
 // Ensures a permanent, non-deletable "General" subject exists — seeded once on boot so
-// there's always a sensible bucket for forms, the same way ensureHostPassword seeds auth.
+// there's always a sensible bucket for forms.
 export function ensureDefaultSubject() {
   if (selectDefaultStmt.get()) return;
 

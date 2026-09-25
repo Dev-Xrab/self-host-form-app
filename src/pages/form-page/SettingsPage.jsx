@@ -69,8 +69,8 @@ export default function SettingsPage() {
 
           <div className="settings-row">
             <div className="settings-row-text">
-              <span className="settings-row-label">Subject</span>
-              <span className="settings-row-desc">Group this form under a subject on the dashboard.</span>
+              <span className="settings-row-label">Folder</span>
+              <span className="settings-row-desc">Group this form under a folder on the dashboard.</span>
             </div>
             <div className="settings-row-control">
               <SubjectSelect
@@ -91,6 +91,20 @@ export default function SettingsPage() {
             description="Let the same device start a new attempt instead of resuming or blocking a repeat."
             checked={settings.allowMultipleResponses}
             onChange={(v) => updateFormSettings({ allowMultipleResponses: v })}
+          />
+
+          <ToggleRow
+            label="Blur the screen when a respondent loses connection"
+            description="If a respondent's device can't reach this server, their screen is blurred and locked until the connection is back — their answers are kept."
+            checked={!!settings.blurOnDisconnect}
+            onChange={(v) => updateFormSettings({ blurOnDisconnect: v })}
+          />
+
+          <ToggleRow
+            label="Restrict copying on the respondent screen"
+            description="Blocks right-click, text selection, copy, cut, select-all, dragging and printing while a respondent answers, and clears the clipboard when Print Screen is pressed. This discourages copying but can't stop a photo of the screen or a determined user."
+            checked={!!settings.restrictCopying}
+            onChange={(v) => updateFormSettings({ restrictCopying: v })}
           />
 
           <p className="settings-note">

@@ -6,7 +6,8 @@ import * as formsRepo from "../forms/repository.js";
 import { diffQuestions, mergeQuestions } from "../forms/questionDiff.js";
 import * as responsesRepo from "../responses/repository.js";
 import { requireAuth } from "../auth/middleware.js";
-import { runSync, pingCloudServer } from "./sync.js";
+import * as sessionsRepo from "../sessions/repository.js";
+import { runSync, pingCloudServer, downloadResponsesForForm } from "./sync.js";
 
 export const cloudRouter = Router();
 
@@ -32,6 +33,12 @@ function sweepExpired(map, ttlMs, getCreatedAt) {
   for (const [key, value] of map) {
     if (getCreatedAt(value) < cutoff) map.delete(key);
   }
+}
+
+// The callback page is rendered on this server's own origin, so nothing from the cloud server's
+// response is ever put into it unescaped.
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
 function base64url(buffer) {
@@ -89,9 +96,9 @@ cloudRouter.get("/auth/start", (req, res) => {
 // never pass through this HTTP response or the browser at all.
 cloudRouter.get("/auth/callback", async (req, res) => {
   const { handoff, state } = req.query;
-  const attempt = state && pendingAttempts.get(String(state));
+  const attempt = typeof state === "string" && pendingAttempts.get(state);
 
-  if (!handoff || !attempt) {
+  if (typeof handoff !== "string" || handoff.length > 200 || !attempt) {
     return res
       .status(400)
       .send("<p>This sign-in attempt is no longer valid. Close this tab and try again from the app.</p>");
@@ -112,7 +119,7 @@ cloudRouter.get("/auth/callback", async (req, res) => {
 
     if (!exchangeRes.ok) {
       const body = await exchangeRes.json().catch(() => ({}));
-      return res.status(502).send(`<p>Sign-in failed: ${body.error || "unexpected error"}.</p>`);
+      return res.status(502).send(`<p>Sign-in failed: ${escapeHtml(body.error || "unexpected error")}.</p>`);
     }
 
     const data = await exchangeRes.json();
@@ -182,22 +189,9 @@ cloudRouter.get("/forms", requireAuth, requireCloudAccount, async (req, res) => 
   }
 });
 
-// These two are keyed by the CLOUD form's own id directly (not a local form id) — "Import from
-// Cloud" browses forms that may not be imported onto this device at all yet, so there's no local
-// row to resolve remoteFormId from the way /forms/:id/publish above does.
-cloudRouter.get("/forms/cloud/:remoteId/versions", requireAuth, requireCloudAccount, async (req, res) => {
-  try {
-    const upstream = await cloudFetch(`/api/forms/${encodeURIComponent(req.params.remoteId)}/versions`);
-    const body = await upstream.json().catch(() => ([]));
-    if (!upstream.ok) {
-      return res.status(upstream.status).json({ error: body.error || "Failed to list versions." });
-    }
-    res.json(body);
-  } catch (err) {
-    res.status(502).json({ error: err.message });
-  }
-});
-
+// Keyed by the CLOUD form's own id directly (not a local form id) — "Import from Cloud" browses
+// forms that may not be imported onto this device at all yet, so there's no local row to resolve
+// remoteFormId from the way /forms/:id/publish below does.
 // Deletes the form from the cloud account entirely (every version, every response, every
 // device's access to it — see cloud-server/forms/repository.js deleteForm). Irreversible.
 cloudRouter.delete("/forms/cloud/:remoteId", requireAuth, requireCloudAccount, async (req, res) => {
@@ -220,33 +214,33 @@ cloudRouter.delete("/forms/cloud/:remoteId", requireAuth, requireCloudAccount, a
 // (see cloud-server/google-forms/routes.js) and then funnels through this exact same path, so a
 // Google-sourced form is indistinguishable from any other cloud form from this point on: same
 // dedup-on-re-import guard, same preserved question ids, same publish/sync behavior.
-// `version` (optional) picks a specific historical snapshot instead of the latest — see
-// cloud-server/forms/repository.js getFormForOwner. Only meaningful for a FRESH import: if this
-// device already has a local copy, that copy is returned as-is regardless of `version` (see the
-// dedup guard below) — picking an old version doesn't retroactively downgrade an existing import.
-async function importCentralFormLocally(remoteFormId, version) {
-  // Importing the same cloud form twice on one device — including the common "publish it here,
-  // then also click Import for it" case — must not create a second local copy: question ids
-  // are preserved from the cloud form (see importForm's preserveQuestionIds) so synced-down
-  // responses' answers stay keyed correctly, and remote_form_id is a real unique index (see
-  // server/db/index.js), so re-inserting the same ids under a second local form row is a hard
-  // conflict, not just redundant. Finding the existing copy first avoids that entirely.
+//
+// The cloud copy is always fetched at its latest version — there is no version picking. If this
+// device already has a local copy (importing the same cloud form twice, including the common
+// "publish it here, then also click Import for it" case, must not mint a second one: remote_form_id
+// is a unique index, see server/db/index.js):
+//   - `refreshExisting` false (the Google path): the local copy is returned untouched.
+//   - `refreshExisting` true (Import from Cloud): the local copy is brought up to the cloud's
+//     latest, unless it has local edits the cloud doesn't have yet, which are only overwritten when
+//     the host confirmed (`overwrite`) — otherwise a 409 tells the UI to ask first.
+async function importCentralFormLocally(remoteFormId, { refreshExisting = false, overwrite = false } = {}) {
   const existingLocalId = formsRepo.getFormIdByRemoteId(remoteFormId);
 
   if (existingLocalId) {
     const existing = formsRepo.getForm(existingLocalId);
-    // No version explicitly requested, or it's the one already here — nothing to do, and
-    // "don't silently overwrite a form already in offline use" holds: the existing local copy
-    // is left exactly as it is.
-    if (!Number.isInteger(version) || version === existing.remoteVersion) {
+    if (!refreshExisting) return { ...existing, alreadyImported: true };
+
+    const remoteForm = await fetchRemoteForm(remoteFormId);
+    if (remoteForm.version === existing.remoteVersion && !existing.hasUnsavedCloudChanges) {
       return { ...existing, alreadyImported: true };
     }
+    if (existing.hasUnsavedCloudChanges && !overwrite) {
+      const err = new Error("This form has changes that aren't saved to the cloud yet.");
+      err.status = 409;
+      err.code = "unsaved_local_changes";
+      throw err;
+    }
 
-    // A DIFFERENT published version was explicitly picked (see the version dropdown on "Import
-    // from Cloud") — pull it down and update this same local form in place rather than minting a
-    // second one, which the unique index above would reject anyway. This is an explicit,
-    // host-initiated action (never automatic), same trust level as editing the form by hand.
-    const remoteForm = await fetchRemoteForm(remoteFormId, version);
     const account = cloudRepo.getCloudAccount();
     formsRepo.updateForm(existingLocalId, {
       title: remoteForm.title,
@@ -262,7 +256,7 @@ async function importCentralFormLocally(remoteFormId, version) {
     return { ...updated, updated: true };
   }
 
-  const remoteForm = await fetchRemoteForm(remoteFormId, version);
+  const remoteForm = await fetchRemoteForm(remoteFormId);
   const account = cloudRepo.getCloudAccount();
 
   return formsRepo.importForm({
@@ -277,9 +271,8 @@ async function importCentralFormLocally(remoteFormId, version) {
   });
 }
 
-async function fetchRemoteForm(remoteFormId, version) {
-  const versionQuery = Number.isInteger(version) ? `?version=${version}` : "";
-  const upstream = await cloudFetch(`/api/forms/${encodeURIComponent(remoteFormId)}${versionQuery}`);
+async function fetchRemoteForm(remoteFormId) {
+  const upstream = await cloudFetch(`/api/forms/${encodeURIComponent(remoteFormId)}`);
   if (!upstream.ok) {
     const body = await upstream.json().catch(() => ({}));
     const err = new Error(body.error || "Failed to fetch the form.");
@@ -290,19 +283,28 @@ async function fetchRemoteForm(remoteFormId, version) {
 }
 
 cloudRouter.post("/forms/:id/import", requireAuth, requireCloudAccount, async (req, res) => {
-  const version = Number.isInteger(req.body?.version) ? req.body.version : undefined;
   try {
-    const imported = await importCentralFormLocally(req.params.id, version);
+    const imported = await importCentralFormLocally(req.params.id, {
+      refreshExisting: true,
+      overwrite: req.body?.overwrite === true,
+    });
+    // Bring down the responses the cloud holds for this form (see downloadResponsesForForm).
+    try {
+      await downloadResponsesForForm(req.params.id);
+    } catch {
+      // Best-effort — the form itself imported fine, and a later sync still picks them up.
+    }
     res.status(imported.alreadyImported || imported.updated ? 200 : 201).json(imported);
   } catch (err) {
-    res.status(err.status || 502).json({ error: err.message });
+    res.status(err.status || 502).json({ error: err.message, code: err.code });
   }
 });
 
 // Pushes a locally-authored (or previously-imported) form to the cloud server, so it can be
 // imported on another device signed in to the same account. First publish creates it; every
 // later publish bumps the version instead of overwriting the previous one (see
-// cloud-server/forms/repository.js publishNewVersion).
+// cloud-server/forms/repository.js publishNewVersion) — history the app itself never exposes: an
+// import always takes the latest.
 cloudRouter.post("/forms/:id/publish", requireAuth, requireCloudAccount, async (req, res) => {
   const form = formsRepo.getForm(req.params.id);
   if (!form) return res.status(404).json({ error: "Form not found." });
@@ -331,7 +333,15 @@ cloudRouter.post("/forms/:id/publish", requireAuth, requireCloudAccount, async (
       ownerUserId: account.userId,
     });
 
-    res.json(updated);
+    // Saving a form to the cloud carries the responses collected under it: they became eligible
+    // for upload the moment remote_form_id was set. That upload can take a while (a real network
+    // round-trip per batch, more if there's a backlog) and has nothing to do with whether the
+    // FORM itself saved — so it's kicked off in the background, not awaited, and the host's "Save
+    // to cloud" click resolves as soon as the form is saved. Uncaught here on purpose: any failure
+    // just leaves those responses queued as pending for the next manual or automatic sync.
+    runSync().catch(() => {});
+
+    res.json(formsRepo.getForm(updated.id));
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
@@ -352,6 +362,8 @@ cloudRouter.get("/sync/status", requireAuth, async (req, res) => {
     // see GET /sync/issues below.
     failedCount: responsesRepo.listSyncIssues().length,
     lastSyncedAt: cloudRepo.getLastSyncedAt(),
+    // Google responses fetched onto this device that the host hasn't chosen to save to the cloud.
+    unsavedToCloudCount: responsesRepo.countLocalOnlyResponses(),
   });
 });
 
@@ -396,6 +408,39 @@ cloudRouter.post("/sync", requireAuth, requireCloudAccount, async (req, res) => 
   }
 });
 
+// Fetches the live Google Form's responses that neither the cloud copy nor this device holds yet and
+// stores them here as 'local' — on this device, visible everywhere, but not uploaded until the host
+// chooses to save them to the cloud (see POST /google-forms/:id/save-to-cloud). Dedup is by Google's
+// own response id, both against the cloud's ledger (done cloud-side) and against what's already here.
+async function pullGoogleResponsesLocally(form) {
+  const upstream = await cloudFetch(`/api/google-forms/${encodeURIComponent(form.remoteFormId)}/responses/new`);
+  const body = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) throw new Error(body.error || "Failed to fetch responses from Google.");
+
+  let sessionId = null;
+  let inserted = 0;
+  let skipped = body.skippedExistingCount || 0;
+  for (const r of body.responses || []) {
+    if (responsesRepo.findResponseByGoogleId(form.id, r.googleResponseId)) {
+      skipped += 1;
+      continue;
+    }
+    sessionId ??= sessionsRepo.findOrCreateGoogleSession(form.id);
+    responsesRepo.insertGoogleResponse({
+      formId: form.id,
+      sessionId,
+      googleResponseId: r.googleResponseId,
+      respondentName: r.respondentName,
+      startedAt: r.startedAt,
+      submittedAt: r.submittedAt,
+      formVersion: form.remoteVersion,
+      answers: r.answers,
+    });
+    inserted += 1;
+  }
+  return { inserted, skipped };
+}
+
 // Real Google Forms (forms.google.com) — distinct from the "/forms" routes above, which only
 // ever deal with forms created in this app and published to the cloud server. Listing here
 // hits the user's actual Google Drive; nothing is imported until they pick one.
@@ -417,7 +462,9 @@ cloudRouter.get("/google-forms", requireAuth, requireCloudAccount, async (req, r
 // point on), then it's pulled down here through the exact same path as any other cloud import.
 cloudRouter.post("/google-forms/:id/import", requireAuth, requireCloudAccount, async (req, res) => {
   try {
-    const upstream = await cloudFetch(`/api/google-forms/${encodeURIComponent(req.params.id)}/import`, {
+    // responses=false: the cloud copy is created from the form's structure only. The responses are
+    // fetched onto this device below and only saved to the cloud if the host says so.
+    const upstream = await cloudFetch(`/api/google-forms/${encodeURIComponent(req.params.id)}/import?responses=false`, {
       method: "POST",
     });
     const created = await upstream.json().catch(() => ({}));
@@ -427,18 +474,28 @@ cloudRouter.post("/google-forms/:id/import", requireAuth, requireCloudAccount, a
 
     const imported = await importCentralFormLocally(created.id);
     formsRepo.setGoogleFormId(imported.id, req.params.id);
-    // Pulls the responses just imported cloud-side down onto this device right away, instead of
-    // leaving them to wait for the user's next manual sync click.
+    // Responses the cloud copy already holds (an earlier import saved them) come down first, so the
+    // fetch below only adds what's genuinely new.
     try {
       await runSync();
     } catch {
-      // Best-effort — the form itself imported fine; the responses will still arrive on the next
-      // sync (manual or automatic) even if this immediate attempt fails (e.g. offline).
+      // Best-effort — arrives on the next sync even if this immediate attempt fails (e.g. offline).
     }
+
+    let fetched = { inserted: 0, skipped: 0 };
+    let responseImportError = null;
+    try {
+      fetched = await pullGoogleResponsesLocally(formsRepo.getForm(imported.id));
+    } catch (err) {
+      responseImportError = err.message;
+    }
+
     res.status(created.alreadyImported ? 200 : 201).json({
       ...formsRepo.getForm(imported.id),
       skipped: created.skipped || [],
-      importedResponseCount: created.importedResponseCount || 0,
+      importedResponseCount: fetched.inserted,
+      unsavedCount: responsesRepo.countLocalOnlyResponses(imported.id),
+      responseImportError,
       alreadyImported: !!created.alreadyImported,
     });
   } catch (err) {
@@ -495,10 +552,10 @@ cloudRouter.post("/google-forms/:id/apply-changes", requireAuth, requireCloudAcc
       formsRepo.updateForm(form.id, { questions: mergeQuestions(form.questions, liveBody.questions || []) });
     }
 
-    // Reused purely for its response-import side effect — the append-only structural update it
-    // also does on the cloud server's own copy is redundant with the merge above (when applicable)
-    // but harmless, and keeps that copy caught up for any other device on the account too.
-    const refreshUpstream = await cloudFetch(`/api/google-forms/${encodeURIComponent(form.remoteFormId)}/refresh`, {
+    // Keeps the cloud server's own copy of the form structure caught up (append-only), for any
+    // other device on the account too. responses=false: new responses are NOT written to the cloud
+    // here — they're fetched onto this device below, and the host decides whether to save them.
+    const refreshUpstream = await cloudFetch(`/api/google-forms/${encodeURIComponent(form.remoteFormId)}/refresh?responses=false`, {
       method: "POST",
     });
     const refreshResult = await refreshUpstream.json().catch(() => ({}));
@@ -516,18 +573,46 @@ cloudRouter.post("/google-forms/:id/apply-changes", requireAuth, requireCloudAcc
     try {
       await runSync();
     } catch {
-      // Best-effort — the structural/response changes are already applied even if this immediate
-      // download pass fails; a later manual or automatic sync still picks them up.
+      // Best-effort — a later manual or automatic sync still picks up anything already on the cloud.
+    }
+
+    let fetched = { inserted: 0, skipped: 0 };
+    let responseImportError = null;
+    try {
+      fetched = await pullGoogleResponsesLocally(formsRepo.getForm(form.id));
+    } catch (err) {
+      responseImportError = err.message;
     }
 
     res.json({
       decision,
-      checkedResponseCount: (refreshResult.newResponseCount || 0) + (refreshResult.skippedExistingResponseCount || 0),
-      newResponseCount: refreshResult.newResponseCount || 0,
-      unchangedResponseCount: refreshResult.skippedExistingResponseCount || 0,
-      responseImportError: refreshResult.responseImportError || null,
+      checkedResponseCount: fetched.inserted + fetched.skipped,
+      newResponseCount: fetched.inserted,
+      unchangedResponseCount: fetched.skipped,
+      // Everything on this device the cloud doesn't have yet — new ones plus any left from earlier
+      // fetches the host didn't save.
+      unsavedCount: responsesRepo.countLocalOnlyResponses(form.id),
+      responseImportError,
     });
   } catch (err) {
     res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
+// The host answered "yes" to saving fetched Google responses to the cloud: queue them for upload and
+// run the upload now. The cloud's Google ledger records each one as it arrives, so a later refresh
+// won't fetch it again (cloud-server/sync/routes.js).
+cloudRouter.post("/google-forms/:id/save-to-cloud", requireAuth, requireCloudAccount, async (req, res) => {
+  const form = formsRepo.getForm(req.params.id);
+  if (!form) return res.status(404).json({ error: "Form not found." });
+  if (!form.remoteFormId) return res.status(400).json({ error: "This form isn't saved to a cloud account." });
+
+  const queued = responsesRepo.promoteLocalResponses(form.id);
+  try {
+    const result = await runSync();
+    res.json({ savedCount: queued, uploaded: result.uploaded, rejected: result.rejected.length });
+  } catch (err) {
+    // Still queued as pending — nothing is lost, the next sync retries.
+    res.status(502).json({ error: err.message, queuedCount: queued });
   }
 });

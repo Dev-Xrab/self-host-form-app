@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import { scoreResponse } from "./grading.js";
 import { REJECTION_MESSAGES, NON_RETRYABLE_REASONS } from "../cloud/rejectionReasons.js";
@@ -16,7 +16,7 @@ const now = () => new Date().toISOString();
 // without anyone else being able to guess or reuse it to touch someone else's response.
 const EDIT_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const generateEditCode = () =>
-  Array.from({ length: 6 }, () => EDIT_CODE_CHARS[Math.floor(Math.random() * EDIT_CODE_CHARS.length)]).join("");
+  Array.from({ length: 6 }, () => EDIT_CODE_CHARS[randomInt(EDIT_CODE_CHARS.length)]).join("");
 
 const editCodeExistsInSessionStmt = db.prepare(
   "SELECT 1 FROM responses WHERE session_id = ? AND edit_code = ?"
@@ -48,6 +48,8 @@ function rowToResponseSummary(row) {
     syncedAt: row.synced_at,
     retryCount: row.retry_count,
     syncError: row.sync_error,
+    googleResponseId: row.google_response_id,
+    refocusLockedUntil: row.refocus_locked_until,
   };
 }
 
@@ -176,9 +178,24 @@ export function reopenResponseForEditing(id, deviceId) {
   if (!existing) return null;
   const finalDeviceId = deviceId || existing.device_id;
   db.prepare(
-    `UPDATE responses SET status = 'in_progress', submitted_at = NULL, deadline_at = NULL, device_id = ?
+    `UPDATE responses SET status = 'in_progress', submitted_at = NULL, deadline_at = NULL, device_id = ?,
+         refocus_locked_until = NULL
      WHERE id = ?`
   ).run(finalDeviceId, id);
+  return getResponse(id);
+}
+
+const setRefocusLockUntilStmt = db.prepare(
+  "UPDATE responses SET refocus_locked_until = ? WHERE id = ? AND status = 'in_progress'"
+);
+
+// Called the moment this respondent's tab is detected going hidden (see server/public/routes.js
+// POST /responses/:id/refocus-lock) — records when the countdown ends server-side, so a reload
+// while away (or right after coming back, before the client's own timer would have run) can't
+// skip it the way purely client-held countdown state could. Only applies to an in-progress
+// response — a submitted one has nothing left to lock.
+export function setRefocusLockUntil(id, lockedUntilIso) {
+  setRefocusLockUntilStmt.run(lockedUntilIso, id);
   return getResponse(id);
 }
 
@@ -338,9 +355,12 @@ const selectResponseVersionStmt = db.prepare("SELECT version FROM responses WHER
 const insertRemoteResponseStmt = db.prepare(`
   INSERT INTO responses (
     id, form_id, session_id, device_id, respondent_name, status, score, max_score,
-    started_at, submitted_at, edit_code, version, form_version, sync_status, synced_at
-  ) VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, 'synced', ?)
+    started_at, submitted_at, edit_code, version, form_version, sync_status, synced_at, google_response_id
+  ) VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, 'synced', ?, ?)
 `);
+const selectByGoogleResponseIdStmt = db.prepare(
+  "SELECT id FROM responses WHERE form_id = ? AND google_response_id = ?"
+);
 const updateRemoteResponseStmt = db.prepare(`
   UPDATE responses SET
     respondent_name = ?, score = ?, max_score = ?, submitted_at = ?, edit_code = ?,
@@ -368,10 +388,17 @@ export function applyRemoteResponse({
   version,
   formVersion,
   deviceId,
+  googleResponseId,
   answers,
 }) {
   const existing = selectResponseVersionStmt.get(id);
   const timestamp = now();
+
+  // A Google response this device already holds (fetched locally, or saved from another device)
+  // arrives here again under the cloud copy's own id — same response, so it's not inserted twice.
+  if (!existing && googleResponseId && selectByGoogleResponseIdStmt.get(localFormId, googleResponseId)) {
+    return "skipped_stale";
+  }
   // node:sqlite refuses to bind `undefined` (only null/number/string/bigint/buffer are
   // valid) — a downloaded payload legitimately omits score/maxScore for an ungraded form, so
   // every optional field is normalized to null here rather than left as whatever the payload
@@ -395,7 +422,8 @@ export function applyRemoteResponse({
         editCode || null,
         version,
         formVersion ?? null,
-        timestamp
+        timestamp,
+        googleResponseId || null
       );
       writeAnswers(id, answers || {});
       db.exec("COMMIT");
@@ -429,4 +457,113 @@ export function applyRemoteResponse({
     throw err;
   }
   return "updated";
+}
+
+const insertImportedResponseStmt = db.prepare(`
+  INSERT INTO responses (
+    id, form_id, session_id, respondent_name, status, score, max_score,
+    started_at, submitted_at, edit_code, version, sync_status
+  ) VALUES (?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, 1, 'pending')
+`);
+
+// Inserts responses that came in with an imported form file. `questionIdMap` translates the
+// exported form's question ids to the ids the import minted for its fresh copy of the form —
+// an answer to a question with no mapping is dropped rather than stored under an id nothing reads.
+// Everything is one transaction so a bad row can't leave a half-imported set behind.
+export function importResponses(formId, sessionId, responses, questionIdMap) {
+  let imported = 0;
+  db.exec("BEGIN");
+  try {
+    for (const r of responses) {
+      const id = randomUUID();
+      const timestamp = now();
+      insertImportedResponseStmt.run(
+        id,
+        formId,
+        sessionId,
+        typeof r.respondentName === "string" ? r.respondentName : "",
+        Number.isFinite(r.score) ? r.score : null,
+        Number.isFinite(r.maxScore) ? r.maxScore : null,
+        r.startedAt || r.submittedAt || timestamp,
+        r.submittedAt || timestamp,
+        uniqueEditCodeForSession(sessionId)
+      );
+      const answers = {};
+      Object.entries(r.answers && typeof r.answers === "object" ? r.answers : {}).forEach(([oldId, value]) => {
+        const newId = questionIdMap.get(oldId);
+        if (newId) answers[newId] = value;
+      });
+      writeAnswers(id, answers);
+      imported += 1;
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+  return imported;
+}
+
+// ---- Google Forms responses fetched locally, not yet saved to the cloud ----
+
+export function findResponseByGoogleId(formId, googleResponseId) {
+  return selectByGoogleResponseIdStmt.get(formId, googleResponseId)?.id || null;
+}
+
+const insertGoogleResponseStmt = db.prepare(`
+  INSERT INTO responses (
+    id, form_id, session_id, respondent_name, status, score, max_score,
+    started_at, submitted_at, edit_code, version, form_version, sync_status, google_response_id
+  ) VALUES (?, ?, ?, ?, 'submitted', NULL, NULL, ?, ?, NULL, 1, ?, 'local', ?)
+`);
+
+// Stored as sync_status 'local': visible everywhere on this device, but never uploaded until the
+// host says so (promoteLocalResponses). Google carries no grading data, so score/max_score stay null.
+export function insertGoogleResponse({ formId, sessionId, googleResponseId, respondentName, startedAt, submittedAt, formVersion, answers }) {
+  const id = randomUUID();
+  const timestamp = now();
+  db.exec("BEGIN");
+  try {
+    insertGoogleResponseStmt.run(
+      id,
+      formId,
+      sessionId,
+      respondentName || "",
+      startedAt || submittedAt || timestamp,
+      submittedAt || startedAt || timestamp,
+      formVersion ?? null,
+      googleResponseId
+    );
+    writeAnswers(id, answers || {});
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+  return id;
+}
+
+const countLocalOnlyStmt = db.prepare("SELECT COUNT(*) AS n FROM responses WHERE sync_status = 'local'");
+const countLocalOnlyForFormStmt = db.prepare(
+  "SELECT COUNT(*) AS n FROM responses WHERE sync_status = 'local' AND form_id = ?"
+);
+const countLocalOnlyByFormStmt = db.prepare(
+  "SELECT form_id, COUNT(*) AS n FROM responses WHERE sync_status = 'local' GROUP BY form_id"
+);
+const promoteLocalStmt = db.prepare(
+  "UPDATE responses SET sync_status = 'pending' WHERE sync_status = 'local' AND form_id = ?"
+);
+
+export function countLocalOnlyResponses(formId) {
+  return (formId ? countLocalOnlyForFormStmt.get(formId) : countLocalOnlyStmt.get()).n;
+}
+
+export function countLocalOnlyResponsesByForm() {
+  return Object.fromEntries(countLocalOnlyByFormStmt.all().map((r) => [r.form_id, r.n]));
+}
+
+// The host chose "Save to cloud": from here these are ordinary pending responses and go up with
+// the next sync. Returns how many were queued.
+export function promoteLocalResponses(formId) {
+  return promoteLocalStmt.run(formId).changes;
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import { getDefaultSubject } from "../subjects/repository.js";
+import { countLocalOnlyResponses, countLocalOnlyResponsesByForm } from "../responses/repository.js";
 
 // Every form gets *some* subject — the permanent "General" one when none is given — rather than
 // a parallel "no subject" state. Falls back to null only in the (should-never-happen) case the
@@ -17,6 +18,12 @@ const DEFAULT_SETTINGS = {
   showScoreImmediately: true,
   revealCorrectAnswers: false,
   downloadIncludesChoices: false,
+  // Respondent screen blurs and locks while their device can't reach this server (see
+  // features/responses/hooks/useServerConnection.js). Off unless the host turns it on per form.
+  blurOnDisconnect: false,
+  // Respondent page blocks right-click, copy/cut/select-all, dragging and printing, and clears the
+  // clipboard on Print Screen (see features/responses/hooks/useCopyProtection.js). Deterrent only.
+  restrictCopying: false,
 };
 
 const now = () => new Date().toISOString();
@@ -52,8 +59,12 @@ function rowToFormMeta(row) {
     updatedAt: row.updated_at,
     remoteFormId: row.remote_form_id,
     remoteVersion: row.remote_version,
+    remoteSavedAt: row.remote_saved_at,
+    // Edited here since it last matched the cloud copy — the cloud doesn't have these changes yet.
+    hasUnsavedCloudChanges: !!row.remote_form_id && !!row.remote_saved_at && row.updated_at > row.remote_saved_at,
     ownerUserId: row.owner_user_id,
     googleFormId: row.google_form_id,
+    bannerImage: row.banner_image,
   };
 }
 
@@ -69,6 +80,9 @@ const selectQuestionsStmt = db.prepare(
   "SELECT * FROM questions WHERE form_id = ? ORDER BY order_index ASC"
 );
 const selectAllFormsStmt = db.prepare("SELECT * FROM forms ORDER BY updated_at DESC");
+const countResponsesStmt = db.prepare(
+  "SELECT form_id, COUNT(*) AS count, MAX(submitted_at) AS last_at FROM responses WHERE status = 'submitted' GROUP BY form_id"
+);
 const countQuestionsStmt = db.prepare(
   "SELECT form_id, COUNT(*) as count FROM questions WHERE type != 'section' GROUP BY form_id"
 );
@@ -88,9 +102,16 @@ export function listForms() {
   const counts = Object.fromEntries(
     countQuestionsStmt.all().map((r) => [r.form_id, r.count])
   );
+  // Responses fetched from Google that only exist on this device so far (see
+  // responses/repository.js insertGoogleResponse) — drives the "unsaved to cloud" chip.
+  const unsaved = countLocalOnlyResponsesByForm();
+  const responseStats = Object.fromEntries(countResponsesStmt.all().map((r) => [r.form_id, r]));
   return forms.map((row) => ({
     ...rowToFormMeta(row),
     questionCount: counts[row.id] || 0,
+    responseCount: responseStats[row.id]?.count || 0,
+    lastResponseAt: responseStats[row.id]?.last_at || null,
+    unsavedResponseCount: unsaved[row.id] || 0,
   }));
 }
 
@@ -98,7 +119,7 @@ export function getForm(id) {
   const row = selectFormStmt.get(id);
   if (!row) return null;
   const questions = selectQuestionsStmt.all(id).map(rowToQuestion);
-  return { ...rowToFormMeta(row), questions };
+  return { ...rowToFormMeta(row), questions, unsavedResponseCount: countLocalOnlyResponses(id) };
 }
 
 export function createForm({ title = "", description = "", subjectId = null } = {}) {
@@ -120,16 +141,19 @@ const insertQuestionStmt = db.prepare(`
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 const updateFormMetaStmt = db.prepare(`
-  UPDATE forms SET title = ?, description = ?, settings = ?, subject_id = ?, updated_at = ? WHERE id = ?
+  UPDATE forms SET title = ?, description = ?, settings = ?, subject_id = ?, banner_image = ?, updated_at = ? WHERE id = ?
 `);
 
-export function updateForm(id, { title, description, settings, questions, subjectId }) {
+export function updateForm(id, { title, description, settings, questions, subjectId, bannerImage }) {
   const existing = selectFormStmt.get(id);
   if (!existing) return null;
 
   const nextTitle = title ?? existing.title;
   const nextDescription = description ?? existing.description;
   const nextSubjectId = subjectId !== undefined ? resolveSubjectId(subjectId) : existing.subject_id;
+  // `null` is a deliberate "remove the banner", so only an outright `undefined` (the field wasn't
+  // part of this update at all) keeps whatever is already stored.
+  const nextBannerImage = bannerImage !== undefined ? bannerImage : existing.banner_image;
   const nextSettings = {
     ...DEFAULT_SETTINGS,
     ...JSON.parse(existing.settings),
@@ -144,6 +168,7 @@ export function updateForm(id, { title, description, settings, questions, subjec
       nextDescription,
       JSON.stringify(nextSettings),
       nextSubjectId,
+      nextBannerImage,
       timestamp,
       id
     );
@@ -217,6 +242,7 @@ export function importForm({
   ownerUserId = null,
   preserveQuestionIds = false,
   googleFormId = null,
+  bannerImage = null,
 } = {}) {
   const id = randomUUID();
   const timestamp = now();
@@ -225,9 +251,9 @@ export function importForm({
   db.exec("BEGIN");
   try {
     db.prepare(
-      `INSERT INTO forms (id, title, description, status, settings, subject_id, created_at, updated_at, remote_form_id, remote_version, owner_user_id, google_form_id)
-       VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, title, description, JSON.stringify(nextSettings), resolveSubjectId(subjectId), timestamp, timestamp, remoteFormId, remoteVersion, ownerUserId, googleFormId);
+      `INSERT INTO forms (id, title, description, status, settings, subject_id, created_at, updated_at, remote_form_id, remote_version, remote_saved_at, owner_user_id, google_form_id, banner_image)
+       VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, title, description, JSON.stringify(nextSettings), resolveSubjectId(subjectId), timestamp, timestamp, remoteFormId, remoteVersion, remoteFormId ? timestamp : null, ownerUserId, googleFormId, bannerImage);
 
     (questions || []).forEach((q, index) => {
       insertQuestionStmt.run(
@@ -260,26 +286,29 @@ export function importForm({
 }
 
 const setRemoteInfoStmt = db.prepare(
-  "UPDATE forms SET remote_form_id = ?, remote_version = ?, owner_user_id = ?, updated_at = ? WHERE id = ?"
+  "UPDATE forms SET remote_form_id = ?, remote_version = ?, owner_user_id = ?, updated_at = ?, remote_saved_at = ? WHERE id = ?"
 );
 
 // Stamps a local form with where it now lives on the cloud server, after a publish (see
 // server/cloud/routes.js POST /forms/:id/publish). Never touches title/description/questions —
 // those are the source of truth locally; this only records the remote pointer.
 export function setRemoteInfo(id, { remoteFormId, remoteVersion, ownerUserId }) {
-  setRemoteInfoStmt.run(remoteFormId, remoteVersion, ownerUserId, now(), id);
+  // Same instant for both, so a form that was just published/imported reads as in step with the
+  // cloud (updated_at is not later than remote_saved_at).
+  const timestamp = now();
+  setRemoteInfoStmt.run(remoteFormId, remoteVersion, ownerUserId, timestamp, timestamp, id);
   return getForm(id);
 }
 
-const setGoogleFormIdStmt = db.prepare(
-  "UPDATE forms SET google_form_id = ?, updated_at = ? WHERE id = ?"
-);
+// Deliberately leaves updated_at alone: linking a Google Form is bookkeeping, not an edit, and
+// bumping it would make a freshly imported form look like it has unsaved cloud changes.
+const setGoogleFormIdStmt = db.prepare("UPDATE forms SET google_form_id = ? WHERE id = ?");
 
 // Records which real Google Form this local form was imported from, so a later
 // "Update from Google" (see server/cloud/routes.js POST /google-forms/:id/refresh) can find
 // its way back to it. Set once at import time; never touched afterward.
 export function setGoogleFormId(id, googleFormId) {
-  setGoogleFormIdStmt.run(googleFormId, now(), id);
+  setGoogleFormIdStmt.run(googleFormId, id);
   return getForm(id);
 }
 

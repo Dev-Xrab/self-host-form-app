@@ -4,10 +4,12 @@ import { useForms } from "../../features/forms/hooks/useForms";
 import { useSubjects } from "../../features/subjects/hooks/useSubjects";
 import { useSessions } from "../../features/sessions/hooks/useSessions";
 import { Icons } from "./icons";
-import { Monogram, initial } from "./Monogram";
 import QrCodeThumb from "./QrCodeThumb";
 import { useServerOrigin } from "./useServerOrigin";
-import "../../features/sessions/components/session.css";
+import { useTunnel } from "../../features/tunnel/hooks/useTunnel";
+import "./dashboard-home.css";
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 export default function DashboardHome() {
   const { forms } = useForms();
@@ -16,6 +18,8 @@ export default function DashboardHome() {
 
   const serverAddress = useServerOrigin();
   const [copied, setCopied] = useState(false);
+  const tunnel = useTunnel();
+  const [tunnelCopied, setTunnelCopied] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(refresh, 5000);
@@ -28,14 +32,20 @@ export default function DashboardHome() {
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const handleCopyTunnel = () => {
+    navigator.clipboard?.writeText(tunnel.url).catch(() => {});
+    setTunnelCopied(true);
+    setTimeout(() => setTunnelCopied(false), 1500);
+  };
+
   const activeSessions = sessions.filter((s) => s.status === "active");
   const endedSessions = sessions.filter((s) => s.status === "ended");
   const studentsInProgress = activeSessions.reduce((sum, s) => sum + s.inProgressCount, 0);
 
   const STATS = [
-    { label: "Forms", value: forms.length, icon: "fileText" },
-    { label: "Ended Sessions", value: endedSessions.length, icon: "clipboard" },
-    { label: "Subjects", value: subjects.length, icon: "book" },
+    { label: "Forms", value: forms.length, icon: "fileText", to: "/dashboard/forms" },
+    { label: "Ended Sessions", value: endedSessions.length, icon: "clipboard", to: "/dashboard/sessions" },
+    { label: "Folders", value: subjects.length, icon: "folder", to: "/dashboard/subjects" },
   ];
 
   return (
@@ -43,163 +53,210 @@ export default function DashboardHome() {
       <header className="dash-header">
         <span className="dash-eyebrow">Admin</span>
         <h1 className="dash-title">Dashboard</h1>
-        <p className="dash-subtitle">Manage sessions, subjects, and forms from one place.</p>
+        <p className="dash-subtitle">Manage sessions, folders, and forms from one place.</p>
       </header>
 
-      <div className="dash-content">
-        <div className="dash-top-row">
-          <div className="dash-card server-card">
-            <div className="server-card-top">
-              <span className="server-icon">
+      <div className="dash-content dh">
+        <div className="dh-top-row">
+          {/* ---------- Local server ---------- */}
+          <div className="dh-card dh-server">
+            <div className="dh-server-head">
+              <span className="dh-server-icon">
                 <Icons.pulse />
               </span>
-              <span className="server-status">
-                <span className="server-status-dot" />
+              <span className="dh-status dh-status-online">
+                <span className="dh-status-dot" aria-hidden="true" />
                 Online
               </span>
             </div>
 
-            <span className="dashboard-card-label">Local Server</span>
-
-            <div className="server-address-row">
-              <span className="server-address">{serverAddress}</span>
-              <button type="button" className="server-copy-btn" onClick={handleCopy} title="Copy address">
+            <span className="dh-label">Local server</span>
+            <div className="dh-address-row">
+              <code title={serverAddress}>{serverAddress}</code>
+              <button type="button" className="dh-icon-btn" onClick={handleCopy} title="Copy address">
                 {copied ? <Icons.check /> : <Icons.copy />}
               </button>
-              <QrCodeThumb value={serverAddress} modalTitle="Scan to join server" />
+            </div>
+            {tunnel.status === "connected" && tunnel.url && (
+              <div className="dh-address-row" title="Public link — reachable from outside this network">
+                <code title={tunnel.url}>{tunnel.url}</code>
+                <button type="button" className="dh-icon-btn" onClick={handleCopyTunnel} title="Copy public link">
+                  {tunnelCopied ? <Icons.check /> : <Icons.copy />}
+                </button>
+              </div>
+            )}
+            <div className="dh-server-qr">
+              <QrCodeThumb value={serverAddress} size={64} modalTitle="Scan to join server" />
+              <span>Scan on a phone to join from this LAN</span>
             </div>
 
-            <div className="server-stats">
-              <div className="server-stat">
-                <span className="server-stat-value">{activeSessions.length}</span>
-                <span className="server-stat-label">Sessions Running</span>
+            <div className="dh-server-stats">
+              <div>
+                <strong>{activeSessions.length}</strong>
+                <span>{plural(activeSessions.length, "session")} running</span>
               </div>
-              <div className="server-stat">
-                <span className="server-stat-value">{studentsInProgress}</span>
-                <span className="server-stat-label">Students Connected</span>
+              <div>
+                <strong>{studentsInProgress}</strong>
+                <span>students connected</span>
               </div>
             </div>
           </div>
 
-          <div className="dash-card quiz-table-card">
-            <div className="quiz-table-top">
+          {/* ---------- Live sessions ---------- */}
+          <div className="dh-card dh-live">
+            <div className="dh-card-head">
               <div>
-                <span className="quiz-table-title">Live Sessions</span>
-                <span className="quiz-table-subtitle">{activeSessions.length} sessions currently running</span>
+                <h2>Live Sessions</h2>
+                <p>
+                  {activeSessions.length === 0
+                    ? "Nothing running right now"
+                    : `${plural(activeSessions.length, "session")} currently running`}
+                </p>
               </div>
-              <Link to="/dashboard/sessions" className="dash-view-all">
+              <Link to="/dashboard/sessions" className="dh-view-all">
                 View all
-                <Icons.arrowRight className="quiz-open-icon" />
+                <Icons.arrowRight />
               </Link>
             </div>
 
-            <div className="quiz-table-header dash-live-session-row">
-              <span>Session</span>
-              <span>Respondents</span>
-              <span className="quiz-col-allotted">Time Limit</span>
-              <span />
-            </div>
-
-            <div className="quiz-table-body">
-              {activeSessions.length === 0 && <p className="dash-empty">No sessions running.</p>}
-              {activeSessions.map((session) => (
-                <div className="quiz-row dash-live-session-row" key={session.id}>
-                  <div className="quiz-name-cell">
-                    <Monogram label={initial(session.name || session.formTitle)} size={32} />
-                    <div className="quiz-name-text">
-                      <span className="quiz-name">{session.name || "Untitled session"}</span>
-                      <span className="quiz-code">{session.code}</span>
-                    </div>
-                  </div>
-
-                  <span className="quiz-students">
-                    {session.submittedCount + session.inProgressCount} joined
-                  </span>
-
-                  <span className="quiz-time-allotted">
-                    {session.durationMinutes ? `${session.durationMinutes} min` : "No limit"}
-                  </span>
-
-                  <Link to={`/dashboard/sessions/${session.id}`} className="quiz-open-btn">
-                    Open
-                    <Icons.arrowRight className="quiz-open-icon" />
-                  </Link>
-                </div>
-              ))}
-            </div>
+            {activeSessions.length === 0 ? (
+              <div className="dh-empty">
+                <span className="dh-empty-icon">
+                  <Icons.clipboard />
+                </span>
+                <p>Start a session from a form to see it here while it's running.</p>
+              </div>
+            ) : (
+              <div className="dh-table-wrap">
+                <table className="dh-table">
+                  <thead>
+                    <tr>
+                      <th>Session</th>
+                      <th>Respondents</th>
+                      <th>Time limit</th>
+                      <th aria-label="Open" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeSessions.map((session) => (
+                      <tr key={session.id}>
+                        <td>
+                          <span className="dh-person">
+                            <span className="dh-avatar">
+                              {(session.name || session.formTitle || "?").trim().charAt(0).toUpperCase()}
+                            </span>
+                            <span className="dh-person-text">
+                              <span className="dh-person-name">{session.name || "Untitled session"}</span>
+                              <span className="dh-person-sub">{session.code}</span>
+                            </span>
+                          </span>
+                        </td>
+                        <td className="dh-muted">{session.submittedCount + session.inProgressCount} joined</td>
+                        <td className="dh-muted">
+                          {session.durationMinutes ? `${session.durationMinutes} min` : "No limit"}
+                        </td>
+                        <td className="dh-row-open">
+                          <Link to={`/dashboard/sessions/${session.id}`} className="dh-open-link">
+                            Open
+                            <Icons.arrowRight />
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="dash-card dash-kpi-strip">
+        {/* ---------- KPI strip ---------- */}
+        <div className="dh-stats">
           {STATS.map((stat) => {
             const Icon = Icons[stat.icon];
             return (
-              <div className="dash-kpi-segment" key={stat.label}>
-                <div className="dash-kpi-top">
-                  <span className="dashboard-card-label">{stat.label}</span>
-                  <span className="dash-kpi-icon">
-                    <Icon />
-                  </span>
-                </div>
-                <span className="dash-kpi-value">{stat.value}</span>
-              </div>
+              <Link className="dh-stat" to={stat.to} key={stat.label}>
+                <span className="dh-stat-icon">
+                  <Icon />
+                </span>
+                <span className="dh-stat-text">
+                  <span className="dh-stat-label">{stat.label}</span>
+                  <span className="dh-stat-value">{stat.value}</span>
+                </span>
+              </Link>
             );
           })}
         </div>
 
-        <section className="dash-section">
-          <div className="dash-section-header">
-            <h2>Subjects</h2>
-            <Link to="/dashboard/subjects" className="dash-view-all">
+        {/* ---------- Folders ---------- */}
+        <section className="dh-card dh-section">
+          <div className="dh-card-head">
+            <div>
+              <h2>Folders</h2>
+            </div>
+            <Link to="/dashboard/subjects" className="dh-view-all">
               View all
-              <Icons.arrowRight className="quiz-open-icon" />
+              <Icons.arrowRight />
             </Link>
           </div>
 
           {subjects.length === 0 ? (
-            <p className="dash-empty">No subjects yet.</p>
+            <div className="dh-empty">
+              <span className="dh-empty-icon">
+                <Icons.folder />
+              </span>
+              <p>No folders yet — create one to start organizing your forms.</p>
+            </div>
           ) : (
-            <div className="dash-list">
+            <div className="dh-list">
               {subjects.slice(0, 5).map((subject) => (
-                <Link className="dash-list-row" key={subject.id} to={`/dashboard/subjects/${subject.id}`}>
-                  <Monogram label={initial(subject.name)} size={32} />
-                  <div className="dash-list-text">
-                    <span className="dash-list-title">{subject.name}</span>
-                    {subject.code && <span className="dash-list-subtitle">{subject.code}</span>}
-                  </div>
-                  <span className="dash-list-meta">
-                    {subject.formCount} form{subject.formCount === 1 ? "" : "s"}
+                <Link className="dh-row" key={subject.id} to={`/dashboard/subjects/${subject.id}`}>
+                  <span className="dh-row-icon">
+                    <Icons.folder />
                   </span>
-                  <Icons.arrowRight className="dash-list-arrow" />
+                  <span className="dh-row-text">
+                    <span className="dh-row-title">{subject.name}</span>
+                    {subject.code && <span className="dh-row-sub">{subject.code}</span>}
+                  </span>
+                  <span className="dh-row-meta">{plural(subject.formCount, "form")}</span>
+                  <Icons.arrowRight className="dh-row-arrow" />
                 </Link>
               ))}
             </div>
           )}
         </section>
 
-        <section className="dash-section">
-          <div className="dash-section-header">
-            <h2>Recent Forms</h2>
-            <Link to="/dashboard/forms" className="dash-view-all">
+        {/* ---------- Recent forms ---------- */}
+        <section className="dh-card dh-section">
+          <div className="dh-card-head">
+            <div>
+              <h2>Recent Forms</h2>
+            </div>
+            <Link to="/dashboard/forms" className="dh-view-all">
               View all
-              <Icons.arrowRight className="quiz-open-icon" />
+              <Icons.arrowRight />
             </Link>
           </div>
 
           {forms.length === 0 ? (
-            <p className="dash-empty">No forms yet.</p>
+            <div className="dh-empty">
+              <span className="dh-empty-icon">
+                <Icons.fileText />
+              </span>
+              <p>No forms yet — start one from a template or a blank form.</p>
+            </div>
           ) : (
-            <div className="dash-list">
+            <div className="dh-list">
               {forms.slice(0, 6).map((form) => (
-                <Link className="dash-list-row" key={form.id} to={`/forms/${form.id}`}>
-                  <Monogram label={<Icons.fileText />} size={32} />
-                  <div className="dash-list-text">
-                    <span className="dash-list-title">{form.title || "Untitled form"}</span>
-                  </div>
-                  <span className="dash-list-meta">
-                    {form.questionCount} question{form.questionCount === 1 ? "" : "s"}
+                <Link className="dh-row" key={form.id} to={`/forms/${form.id}`}>
+                  <span className="dh-row-icon">
+                    <Icons.fileText />
                   </span>
-                  <Icons.arrowRight className="dash-list-arrow" />
+                  <span className="dh-row-text">
+                    <span className="dh-row-title">{form.title || "Untitled form"}</span>
+                  </span>
+                  <span className="dh-row-meta">{plural(form.questionCount, "question")}</span>
+                  <Icons.arrowRight className="dh-row-arrow" />
                 </Link>
               ))}
             </div>

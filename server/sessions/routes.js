@@ -47,24 +47,49 @@ sessionsRouter.get("/", (req, res) => {
   res.json(sessionsRepo.listSessions().map(withFormTitle));
 });
 
+const MAX_SESSION_NAME_LENGTH = 200;
+const MAX_DURATION_MINUTES = 7 * 24 * 60;
+
+function validateSessionFields({ name, durationMinutes }) {
+  if (name !== undefined && name !== null && (typeof name !== "string" || name.length > MAX_SESSION_NAME_LENGTH)) {
+    return `name must be a string of at most ${MAX_SESSION_NAME_LENGTH} characters`;
+  }
+  if (durationMinutes !== undefined && durationMinutes !== null) {
+    if (typeof durationMinutes !== "number" || !Number.isFinite(durationMinutes) || durationMinutes <= 0 || durationMinutes > MAX_DURATION_MINUTES) {
+      return "durationMinutes must be a positive number of minutes (at most one week)";
+    }
+  }
+  return null;
+}
+
+function validateRefocusLockSeconds(refocusLockSeconds) {
+  if (refocusLockSeconds === undefined || refocusLockSeconds === null) return null;
+  if (typeof refocusLockSeconds !== "number" || !Number.isInteger(refocusLockSeconds) || refocusLockSeconds <= 0 || refocusLockSeconds > 3600) {
+    return "refocusLockSeconds must be a positive whole number of seconds";
+  }
+  return null;
+}
+
 sessionsRouter.post("/", (req, res) => {
-  const { name, formId, durationMinutes, responsesEditable } = req.body || {};
+  const { name, formId, durationMinutes, responsesEditable, refocusLockSeconds, fullscreenEnabled } = req.body || {};
   if (!formId || typeof formId !== "string") {
     return res.status(400).json({ error: "formId is required" });
   }
   if (!formsRepo.getForm(formId)) {
     return res.status(400).json({ error: "formId does not refer to an existing form" });
   }
-  if (durationMinutes !== undefined && durationMinutes !== null) {
-    if (typeof durationMinutes !== "number" || durationMinutes <= 0) {
-      return res.status(400).json({ error: "durationMinutes must be a positive number" });
-    }
-  }
+  const fieldError = validateSessionFields({ name, durationMinutes });
+  if (fieldError) return res.status(400).json({ error: fieldError });
+  const refocusError = validateRefocusLockSeconds(refocusLockSeconds);
+  if (refocusError) return res.status(400).json({ error: refocusError });
+
   const session = sessionsRepo.createSession({
     formId,
     name: typeof name === "string" ? name.trim() : "",
     durationMinutes: durationMinutes || null,
     responsesEditable: !!responsesEditable,
+    refocusLockSeconds: refocusLockSeconds || null,
+    fullscreenEnabled: !!fullscreenEnabled,
   });
   res.status(201).json(withFormTitle(session));
 });
@@ -77,6 +102,8 @@ sessionsRouter.get("/:id", (req, res) => {
 
 sessionsRouter.put("/:id", (req, res) => {
   const { name, durationMinutes } = req.body || {};
+  const fieldError = validateSessionFields({ name, durationMinutes });
+  if (fieldError) return res.status(400).json({ error: fieldError });
   const result = sessionsRepo.updateSession(req.params.id, { name, durationMinutes });
   if (!result) return res.status(404).json({ error: "Session not found" });
   if (result === "not_draft") {
@@ -91,6 +118,29 @@ sessionsRouter.post("/:id/editable", (req, res) => {
     return res.status(400).json({ error: "editable must be a boolean" });
   }
   const session = sessionsRepo.setResponsesEditable(req.params.id, editable);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+  res.json(withFormTitle(session));
+});
+
+// `seconds`: null/0 turns the countdown off; a positive integer sets it (see
+// sessionsRepo.setRefocusLock and the respondent page's visibilitychange handling).
+sessionsRouter.post("/:id/refocus-lock", (req, res) => {
+  const { seconds } = req.body || {};
+  if (seconds !== null && seconds !== undefined) {
+    const error = validateRefocusLockSeconds(seconds);
+    if (error) return res.status(400).json({ error });
+  }
+  const session = sessionsRepo.setRefocusLock(req.params.id, seconds || null);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+  res.json(withFormTitle(session));
+});
+
+sessionsRouter.post("/:id/fullscreen", (req, res) => {
+  const { enabled } = req.body || {};
+  if (typeof enabled !== "boolean") {
+    return res.status(400).json({ error: "enabled must be a boolean" });
+  }
+  const session = sessionsRepo.setFullscreenEnabled(req.params.id, enabled);
   if (!session) return res.status(404).json({ error: "Session not found" });
   res.json(withFormTitle(session));
 });
