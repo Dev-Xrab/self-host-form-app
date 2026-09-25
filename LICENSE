@@ -1,21 +1,59 @@
-MIT License
+Self Host Form Source-Available License
 
-Copyright (c) 2026 Dev-Xrab
+Copyright (c) 2026 Dev-Xrab. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This software and its source code (the "Software") are made publicly
+available for viewing and community contribution. The Software is NOT open
+source. Your use of it is subject to the following terms.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. PERMITTED USES
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+   You may, free of charge:
+
+   a. View and study the source code.
+   b. Download, install, and run the Software for personal, educational, or
+      internal classroom and institutional use.
+   c. Modify the source code for your own use, or to prepare contributions
+      submitted to the official repository at
+      https://github.com/Dev-Xrab/self-host-form-app.
+   d. Fork the repository on GitHub, as permitted by GitHub's Terms of
+      Service, for the purpose of submitting contributions.
+
+2. RESTRICTIONS
+
+   Without prior written permission from the copyright holder, you may NOT:
+
+   a. Distribute, publish, sublicense, or otherwise make available the
+      Software or any modified version of it, whether in source or binary
+      form, except as described in section 1(d).
+   b. Sell, rent, lease, or otherwise commercialize the Software or any
+      modified version of it, including offering it as a paid or hosted
+      service to third parties.
+   c. Remove or change any copyright, license, or attribution notices.
+
+3. CONTRIBUTIONS
+
+   By submitting a contribution (such as a pull request, patch, or code
+   suggestion) to the official repository, you grant the copyright holder a
+   perpetual, worldwide, non-exclusive, royalty-free, irrevocable license to
+   use, modify, sublicense, and distribute your contribution as part of the
+   Software under any terms. You confirm that you have the right to grant
+   this license.
+
+4. TERMINATION
+
+   If you break any of these terms, your rights under this license end
+   automatically.
+
+5. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+   DEALINGS IN THE SOFTWARE.
+
+For permission to distribute or use the Software commercially, contact the
+copyright holder at https://github.com/Dev-Xrab.

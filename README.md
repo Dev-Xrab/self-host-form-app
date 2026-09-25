@@ -68,4 +68,4 @@ To report a security vulnerability, see [SECURITY.md](SECURITY.md). Please don't
 
 ## License
 
-[MIT](LICENSE)
+This project is **source-available, not open source.** You can view the code, run it for personal or school use, and change it to send us contributions. You may **not** redistribute or sell it, or modified versions of it, without permission. See [LICENSE](LICENSE) for the full terms.

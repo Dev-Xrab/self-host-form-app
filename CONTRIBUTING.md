@@ -38,6 +38,10 @@ Please include:
 
 Don't report vulnerabilities in public issues. See [SECURITY.md](SECURITY.md).
 
+## License of contributions
+
+This project is source-available, not open source. When you submit a contribution, you agree to the contribution terms in section 3 of the [LICENSE](LICENSE): the project owner can use and distribute your contribution as part of the project.
+
 ## Code of Conduct
 
 By taking part, you agree to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
